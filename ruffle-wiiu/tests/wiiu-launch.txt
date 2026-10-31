@@ -1,0 +1,7 @@
+60 press a
+62 release a
+66 shot
+78 shot
+40 leave
+30 shot
+50 quit

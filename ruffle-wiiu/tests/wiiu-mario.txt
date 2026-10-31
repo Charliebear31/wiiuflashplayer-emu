@@ -1,0 +1,4 @@
+0 movie /wiiu/apps/flashplayeremu/swf/unfair_mario.swf
+120 shot
+300 shot
+360 quit

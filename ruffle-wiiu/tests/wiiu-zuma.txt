@@ -1,0 +1,4 @@
+10 movie /wiiu/apps/flashplayeremu/swf/zuma/zuma2.swf
+600 shot
+620 leave
+10 quit

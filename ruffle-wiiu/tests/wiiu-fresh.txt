@@ -1,0 +1,3 @@
+2 shot
+300 shot
+600 quit

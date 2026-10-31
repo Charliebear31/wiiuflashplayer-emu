@@ -1,0 +1,14 @@
+60 press plus
+62 release plus
+80 press down
+82 release down
+86 press down
+88 release down
+96 press a
+98 release a
+120 shot
+130 press b
+132 release b
+150 movie /wiiu/apps/flashplayeremu/swf/bloons2xmas.swf
+400 shot
+420 quit

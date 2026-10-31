@@ -1,0 +1,2 @@
+120 movie ftests/bitmapdata_applyfilter_blur.swf
+140 shot

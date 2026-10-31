@@ -1,0 +1,14 @@
+Flashplayer Emu for Wii U
+=========================
+
+Wii U port by Charliebear31.
+Menu music: "Slimers" by (T-T)b.
+Adobe Flash theme music: "The World's Hardest Game" by Stephen Critoph.
+Halloween theme music: "Not As It Seems" by Kevin MacLeod (incompetech.com), Creative Commons Attribution license.
+
+Flash player engine: Ruffle (https://ruffle.rs), MIT / Apache-2.0, by the Ruffle contributors.
+Ruffle is compiled to WebAssembly, translated to C with wasm2c (WABT), and built with devkitPro/wut.
+MP3 decoding: minimp3 by lieff (CC0).
+Shaders compiled with CafeGLSL by Exzap (MIT).
+Menu font: 8x8 font from libnds (zlib license).
+Game text fonts: Liberation Fonts 2.1.5 (SIL Open Font License 1.1, see fonts/LICENSE-Liberation.txt).

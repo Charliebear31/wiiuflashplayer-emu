@@ -1,0 +1,55 @@
+60 press plus
+62 release plus
+90 shot
+100 press down
+102 release down
+112 press down
+114 release down
+124 press down
+126 release down
+136 press down
+138 release down
+148 press down
+150 release down
+160 press up
+162 release up
+172 press up
+174 release up
+184 press up
+186 release up
+196 press up
+198 release up
+208 press up
+210 release up
+220 press down
+222 release down
+232 press down
+234 release down
+244 press down
+246 release down
+256 press down
+258 release down
+268 press down
+270 release down
+280 press up
+282 release up
+292 press up
+294 release up
+304 press up
+306 release up
+316 press up
+318 release up
+328 press up
+330 release up
+345 press down
+347 release down
+360 press right
+362 release right
+380 shot
+400 press left
+402 release left
+420 shot
+440 press b
+442 release b
+470 shot
+500 quit

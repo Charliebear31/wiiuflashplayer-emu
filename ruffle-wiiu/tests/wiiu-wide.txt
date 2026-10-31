@@ -1,0 +1,9 @@
+30 press plus
+32 release plus
+60 shot
+70 press b
+72 release b
+90 movie /wiiu/apps/flashplayeremu/swf/wide_test.swf
+60 shot
+80 leave
+40 quit

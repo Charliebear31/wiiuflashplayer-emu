@@ -1,0 +1,10 @@
+100 move 300 270
+120 down 300 270
+126 up 300 270
+200 shot
+220 keydown right
+300 shot
+330 keyup right
+331 keydown up
+340 keyup up
+350 shot

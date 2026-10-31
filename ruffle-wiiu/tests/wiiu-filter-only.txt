@@ -1,0 +1,3 @@
+0 movie /wiiu/apps/flashplayeremu/swf/filter_blur_test.swf
+30 shot
+40 quit

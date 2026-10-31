@@ -1,0 +1,3 @@
+0 movie /wiiu/apps/flashplayeremu/swf/stage3d_triangle.swf
+30 shot
+60 quit

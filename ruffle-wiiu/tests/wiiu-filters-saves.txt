@@ -1,0 +1,6 @@
+10 movie /wiiu/apps/flashplayeremu/swf/unfair_mario.swf
+120 leave
+10 movie /wiiu/apps/flashplayeremu/swf/filter_blur_test.swf
+30 shot
+40 leave
+10 quit

@@ -1,0 +1,26 @@
+60 shot
+70 press down
+75 release down
+80 press down
+85 release down
+130 shot
+140 press plus
+145 release plus
+190 shot
+200 press down
+205 release down
+210 press down
+215 release down
+220 press down
+225 release down
+230 press a
+235 release a
+280 shot
+290 press b
+295 release b
+300 press b
+305 release b
+330 movie /wiiu/apps/flashplayeremu/swf/unfair_mario.swf
+200 shot
+220 leave
+10 quit

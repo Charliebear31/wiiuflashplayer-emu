@@ -1,0 +1,28 @@
+60 shot
+100 down 176 293
+110 move 220 310
+130 move 469 293
+160 shot
+170 up
+200 shot
+230 down 1055 293
+240 move 1000 300
+250 move 300 293
+270 shot
+280 up
+300 shot
+320 down 176 293
+325 up
+345 shot
+360 settext My Games
+380 shot
+400 down 176 293
+410 move 220 310
+420 move 100 176
+430 shot
+440 up
+460 shot
+480 press b
+482 release b
+500 shot
+520 quit

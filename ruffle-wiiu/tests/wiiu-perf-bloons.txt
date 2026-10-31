@@ -1,0 +1,5 @@
+10 movie /wiiu/apps/flashplayeremu/swf/bloons2xmas.swf
+300 press a
+305 release a
+620 shot
+920 quit

@@ -1,0 +1,35 @@
+100 shot
+110 press plus
+115 release plus
+140 press a
+145 release a
+200 shot
+210 press b
+215 release b
+300 shot
+420 shot
+430 press plus
+435 release plus
+460 press a
+465 release a
+480 press b
+485 release b
+600 shot
+720 shot
+730 movie /swftest/Sugar Sugar.swf
+0 realtime
+300 stick 0.8 0.5
+420 shot
+430 stick 0 0
+440 press l
+445 release l
+600 shot
+700 stick 0 -0.8
+760 stick 0 0
+770 press r
+775 release r
+780 shot
+900 press minus
+905 release minus
+120 shot
+200 quit

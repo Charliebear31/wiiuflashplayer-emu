@@ -1,0 +1,2 @@
+10 movie /wiiu/apps/flashplayeremu/swf/bloons2xmas.swf
+120 quit

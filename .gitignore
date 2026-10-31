@@ -1,0 +1,13 @@
+target/
+build-pc/
+build-wiiu/
+buildtools/
+ruffle-wiiu/gen/
+ruffle-wiiu/out/
+ruffle-wiiu/testroot/
+ruffle-wiiu/ruffle/tests/tests/swfs/
+*.swf.bak
+*.bak
+*.elf
+*.rpx
+*.wuhb

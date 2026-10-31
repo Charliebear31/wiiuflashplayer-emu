@@ -1,0 +1,14 @@
+10 movie /swftest/doll.swf
+0 realtime
+300 shot
+360 press minus
+365 release minus
+60 movie /swftest/Snoring.swf
+0 realtime
+300 shot
+360 press minus
+365 release minus
+60 movie /swftest/Toss The Turtle.swf
+0 realtime
+300 shot
+320 quit

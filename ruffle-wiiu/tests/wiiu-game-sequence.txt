@@ -1,0 +1,13 @@
+10 movie /swftest/Cat Mario.swf
+0 realtime
+600 leave
+60 movie /swftest/Moto X3M.swf
+0 realtime
+600 leave
+60 movie /swftest/Run 3.swf
+0 realtime
+900 leave
+60 movie /swftest/Snoring.swf
+0 realtime
+900 click 640 400
+1500 quit

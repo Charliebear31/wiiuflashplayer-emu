@@ -1,0 +1,25 @@
+[package]
+name = "ruffle_wiiu"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+# Built for wasm32-wasip1, then turned into C by wasm2c and compiled with devkitPPC.
+# Everything platform-specific (GX2, audio out, input, files) lives in the C side (../../host).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruffle_core = { path = "../core", features = ["audio", "mp3", "aac", "nellymoser", "lzma", "jpegxr", "default_compatibility_rules", "default_font"] }
+ruffle_render = { path = "../render", features = ["tessellator"] }
+ruffle_video_software = { path = "../video/software" }
+ruffle_video = { path = "../video" }
+slotmap = { workspace = true }
+swf = { path = "../swf" }
+async-channel = { workspace = true }
+naga-agal = { path = "../render/naga-agal" }
+naga-pixelbender = { path = "../render/naga-pixelbender", default-features = false }
+naga = { workspace = true, features = ["glsl-out"] }
+indexmap = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }

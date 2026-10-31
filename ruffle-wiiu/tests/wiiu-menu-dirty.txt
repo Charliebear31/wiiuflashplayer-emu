@@ -1,0 +1,14 @@
+60 shot
+200 press right
+202 release right
+230 shot
+300 press plus
+302 release plus
+330 shot
+340 press down
+342 release down
+360 shot
+480 press b
+482 release b
+500 shot
+620 quit

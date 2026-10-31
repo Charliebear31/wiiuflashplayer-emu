@@ -1,0 +1,21 @@
+[package]
+name = "naga-pixelbender"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ruffle_render = { path = "../" }
+naga = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["wgsl"]
+# The vertex shader as a module. Wii U: not needed (it has its own), and the WGSL parser is large.
+wgsl = ["naga/wgsl-in"]

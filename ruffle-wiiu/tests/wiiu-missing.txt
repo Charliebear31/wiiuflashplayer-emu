@@ -1,0 +1,3 @@
+10 movie /wiiu/apps/flashplayeremu/swf/nothere.swf
+300 shot
+320 quit

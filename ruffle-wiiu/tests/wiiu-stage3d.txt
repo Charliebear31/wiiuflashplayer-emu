@@ -1,0 +1,16 @@
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_triangle.swf
+40 shot
+50 leave
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_rotating_cube.swf
+40 shot
+50 leave
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_fractal.swf
+40 shot
+50 leave
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_blend.swf
+40 shot
+50 leave
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_texture.swf
+40 shot
+50 leave
+10 quit

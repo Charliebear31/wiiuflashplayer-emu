@@ -1,0 +1,7 @@
+10 movie /wiiu/apps/flashplayeremu/swf/627922_Digger.swf
+150 shot
+250 shot
+400 shot
+600 shot
+620 leave
+10 quit

@@ -1,0 +1,28 @@
+50 shot
+70 press right
+72 release right
+95 press down
+97 release down
+117 shot
+120 press down
+122 release down
+142 shot
+145 press down
+147 release down
+167 shot
+170 press down
+172 release down
+192 shot
+195 press up
+197 release up
+217 shot
+220 press up
+222 release up
+242 shot
+245 press up
+247 release up
+267 shot
+270 press left
+272 release left
+355 shot
+375 quit

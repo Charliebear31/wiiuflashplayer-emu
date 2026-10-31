@@ -1,0 +1,41 @@
+10 movie /swftest/Sugar Sugar.swf
+0 realtime
+200 stick -0.6 -0.3
+260 stick 0.6 0.3
+320 stick -0.6 -0.3
+380 stick 0.6 0.3
+440 stick -0.6 -0.3
+500 stick 0.6 0.3
+560 stick -0.6 -0.3
+620 stick 0.6 0.3
+680 stick -0.6 -0.3
+740 stick 0.6 0.3
+800 stick -0.6 -0.3
+860 stick 0.6 0.3
+920 stick -0.6 -0.3
+980 stick 0.6 0.3
+1040 stick -0.6 -0.3
+1100 stick 0.6 0.3
+1160 stick -0.6 -0.3
+1220 stick 0.6 0.3
+1230 shot
+1280 stick -0.6 -0.3
+1340 stick 0.6 0.3
+1400 stick -0.6 -0.3
+1460 stick 0.6 0.3
+1520 stick -0.6 -0.3
+1580 stick 0.6 0.3
+1640 stick -0.6 -0.3
+1700 stick 0.6 0.3
+1760 stick -0.6 -0.3
+1820 stick 0.6 0.3
+1880 stick -0.6 -0.3
+1940 stick 0.6 0.3
+2000 stick -0.6 -0.3
+2060 stick 0.6 0.3
+2120 stick -0.6 -0.3
+2180 stick 0.6 0.3
+2240 stick -0.6 -0.3
+2300 press minus
+2305 release minus
+60 quit

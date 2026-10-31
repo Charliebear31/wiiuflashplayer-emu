@@ -1,0 +1,4 @@
+10 movie /wiiu/apps/flashplayeremu/swf/stage3d_texture_bytearray_compressed_raw_alpha.swf
+40 shot
+50 leave
+10 quit

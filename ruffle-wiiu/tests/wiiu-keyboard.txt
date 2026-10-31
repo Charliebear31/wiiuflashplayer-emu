@@ -1,0 +1,8 @@
+10 movie /wiiu/apps/flashplayeremu/kbtest.swf
+120 touch 595 207
+150 settext Charlie
+200 shot
+210 touch 595 207
+240 settext Bear31
+260 shot
+280 quit

@@ -1,0 +1,8 @@
+60 shot
+90 press right
+95 release right
+130 shot
+140 press down
+145 release down
+200 shot
+230 quit

@@ -1,0 +1,6 @@
+60 shot
+70 movie /wiiu/apps/flashplayeremu/swf/whg.swf
+200 shot
+260 leave
+60 shot
+100 quit

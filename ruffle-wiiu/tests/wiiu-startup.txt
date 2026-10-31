@@ -1,0 +1,4 @@
+10 movie /wiiu/apps/flashplayeremu/swf/papas.swf
+910 leave
+10 movie /wiiu/apps/flashplayeremu/swf/awesometanks.swf
+910 quit

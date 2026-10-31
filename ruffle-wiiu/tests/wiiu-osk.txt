@@ -1,0 +1,16 @@
+10 movie /swftest/Sugar Sugar.swf
+0 realtime
+300 shot
+320 tdown 20 690
+326 tup
+360 shot
+380 tdown 400 590
+386 shot
+400 tup
+420 tdown 300 640
+430 tup
+440 shot
+460 tdown 980 590
+470 tup
+500 shot
+520 quit
