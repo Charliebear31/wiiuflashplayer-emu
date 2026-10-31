@@ -2,8 +2,8 @@ Flashplayer Emu for Wii U
 =========================
 
 Wii U port by Charliebear31.
-Menu music: "Slimers" by (T-T)b.
-Adobe Flash theme music: "The World's Hardest Game" by Stephen Critoph.
+Classic theme music: "Cipher" by Kevin MacLeod (incompetech.com), Creative Commons Attribution license.
+Adobe Flash theme music: "Sneaky Snitch" by Kevin MacLeod (incompetech.com), Creative Commons Attribution license.
 Halloween theme music: "Not As It Seems" by Kevin MacLeod (incompetech.com), Creative Commons Attribution license.
 
 Flash player engine: Ruffle (https://ruffle.rs), MIT / Apache-2.0, by the Ruffle contributors.

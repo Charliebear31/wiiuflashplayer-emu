@@ -85,14 +85,12 @@ The build runs on Windows. It needs devkitPro with devkitPPC and wut, Rust with 
 
 The scripts expect these tools in a `buildtools` folder next to `ruffle-wiiu`; `ruffle-wiiu/tools/env.ps1` lists them. Ruffle's large test suite is left out of this repository: get `tests/tests/swfs` from the Ruffle project if you want to run it.
 
-Two music tracks are also left out of this repository: `slimers.mp3` and `worlds_hardest_game.mp3`. To build with them, place your own copies in `ruffle-wiiu/host/wiiu/content/music/`.
-
 ## Credits
 
 - **Wii U port:** Charliebear31
 - **Flash engine:** [Ruffle](https://ruffle.rs) by the Ruffle contributors (MIT / Apache-2.0, see [its license](ruffle-wiiu/ruffle/LICENSE.md))
-- **Menu music:** "Slimers" by (T-T)b
-- **Adobe Flash theme music:** "The World's Hardest Game" by Stephen Critoph
+- **Classic theme music:** "Cipher" by Kevin MacLeod (incompetech.com), Creative Commons Attribution
+- **Adobe Flash theme music:** "Sneaky Snitch" by Kevin MacLeod (incompetech.com), Creative Commons Attribution
 - **Halloween theme music:** "Not As It Seems" by Kevin MacLeod (incompetech.com), Creative Commons Attribution
 - **Tools and libraries:** wasm2c (WABT), devkitPro/wut, CafeGLSL by Exzap (MIT), minimp3 by lieff (CC0), libnds 8x8 font (zlib), Liberation Fonts (SIL OFL 1.1)
 

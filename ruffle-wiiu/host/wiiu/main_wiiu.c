@@ -999,8 +999,8 @@ static Settings g_set = { 4, 1, 0, 0 };
 static const char* const MUSIC_NAMES[] = { "Off", "Quiet", "Medium", "Loud", "Max" };
 static const char* const THEME_NAMES[UI_THEME_COUNT] = { "Classic", "Adobe Flash", "Halloween" };
 static const char* const THEME_MUSIC[UI_THEME_COUNT] = {
-    "fs:/vol/content/music/slimers.mp3",
-    "fs:/vol/content/music/worlds_hardest_game.mp3",
+    "fs:/vol/content/music/cipher.mp3",
+    "fs:/vol/content/music/sneaky_snitch.mp3",
     "fs:/vol/content/music/not_as_it_seems.mp3",
 };
 

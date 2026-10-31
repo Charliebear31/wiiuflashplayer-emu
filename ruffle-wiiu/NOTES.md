@@ -54,13 +54,13 @@ Route: Ruffle (Rust) -> `wasm32-wasip1` -> **wasm2c** -> C -> devkitPPC/wut. Sam
   Credits, Back; saved in `settings.txt` (music=, borders=). One tap on a game starts it.
 - Borders only when side bars >= 60 px; 16:9 (or wider) games fill the screen with none
   (`tests/wiiu-wide.txt`, `tools/make-test-swf.ps1` makes plain-color SWFs of any size).
-- Shown name is **Flashplayer Emu** (menu title + .wuhb NAME). Footer credits: music **"Slimers" by (T-T)b**,
+- Shown name is **Flashplayer Emu** (menu title + .wuhb NAME). Footer credits: the theme's music,
   **Port by Charliebear31** (user's wording; keep exactly). Ruffle/minimp3/CafeGLSL/libnds font credited in
   `host/wiiu/content/CREDITS.txt` (packed in the .wuhb).
 - Look: old Flash-game-site homepage (black page, rainbow letters, bright tabs, colored tiles) - styled after
   the user's "old Coolmath Games" request without their name/logo. `host/wiiu/ui.c` draws it on the CPU into
   the screen texture; 4x2 tile grid, tabs double as a controls legend.
-- Music: **only** the bundled `content/music/slimers.mp3` (/vol/content in the .wuhb), decoded by minimp3 in
+- Music: **only** the bundled `content/music/*.mp3` (/vol/content in the .wuhb), decoded by minimp3 in
   `music.c`, looped, menu only. User rule: no custom/SD music.
 - Game pictures: first time a game is seen, `make_thumb` runs it at 400x300 until Ruffle reports the root
   movie loaded (`rw_load_permille`) plus 150 ticks (cap 1800), halves the last frame to 200x150 and caches
@@ -235,8 +235,8 @@ Route: Ruffle (Rust) -> `wasm32-wasip1` -> **wasm2c** -> C -> devkitPPC/wut. Sam
   Cemu's test setup has none connected.
 - Themes (ui.c THEMES, settings.txt theme=): Classic, Adobe Flash, Halloween. theme_animate redraws only the two
   header ends each frame. Classic's shapes aren't in the cached base, so the dimmed menu behind settings lacks them.
-- Theme music, chosen by the user (main_wiiu.c THEME_MUSIC): Classic "Slimers", Flash "The World's Hardest Game",
-  Halloween "Not As It Seems". The tracks are in content/music; music_switch reloads on a theme change.
+- Theme music, chosen by the user (main_wiiu.c THEME_MUSIC): Classic "Cipher", Flash "Sneaky Snitch",
+  Halloween "Not As It Seems", all Kevin MacLeod (CC BY). The tracks are in content/music; music_switch reloads on a theme change.
 - GPU speed: games draw into tiled g_game_screen and filters use tiled scratch textures (linear targets are slow on
   the console). Readback draws the tiled picture into linear g_screen (GX2CopySurface left it unchanged in Cemu).
 - Log "slow spots" appear after 300-frame windows with logic over 20 ms: PC buckets with counts from the console.

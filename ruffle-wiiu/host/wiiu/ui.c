@@ -2,7 +2,7 @@
 // Look: an early-2000s math/Flash-games homepage - black page, chunky cartoon lettering with outlines,
 // rows of bright geometric shapes, thick red/yellow/green box borders, ">>>>> heading <<<<<" arrows,
 // oval and slanted buttons, blue underlined game names. (Our own title and art; the font is Chewy.)
-// Menu music: "Slimers" by (T-T)b. Port by Charliebear31.
+// Menu music: see content/CREDITS.txt. Port by Charliebear31.
 #include "ui.h"
 #include "../rw_core.h"
 #include "font_chewy.h"
@@ -1276,9 +1276,9 @@ static void draw_base(const UiGame* games, int n) {
     const char* keys = g_in_folder ? "A = play   B = back   X = rename" : "A = play   L/R = page   + = settings";
     ftext(UI_W - 24 - ftext_w(keys, 30), FOOT_Y, keys, 30, YELLOW, NO_LINE, 2);
     ftext(90, FOOT_Y + 44, "Now playing:", 30, WHITE, NO_LINE, 2);
-    const char* song = g_theme == UI_THEME_FLASH ? "\"The World's Hardest Game\" by Stephen Critoph"
+    const char* song = g_theme == UI_THEME_FLASH ? "\"Sneaky Snitch\" by Kevin MacLeod"
                        : g_theme == UI_THEME_HALLOWEEN ? "\"Not As It Seems\" by Kevin MacLeod"
-                                                       : "\"Slimers\" by (T-T)b";
+                                                       : "\"Cipher\" by Kevin MacLeod";
     ftext_fit(90 + ftext_w("Now playing: ", 30), FOOT_Y + 44, song, 30, GREEN, NO_LINE, 2, 620, 0);
     // "Port by Charliebear31", the name in bright letters
     const char* by = "Port by ";
@@ -1767,8 +1767,8 @@ void ui_draw_credits(uint8_t* canvas, float t) {
         { "Port by Charliebear31", YELLOW, 40 },
         { "", 0, 10 },
         { "Menu music", GREEN, 32 },
-        { "\"Slimers\" by (T-T)b", WHITE, 28 },
-        { "\"The World's Hardest Game\" by Stephen Critoph", WHITE, 28 },
+        { "\"Cipher\" by Kevin MacLeod (incompetech.com), CC BY", WHITE, 28 },
+        { "\"Sneaky Snitch\" by Kevin MacLeod (incompetech.com), CC BY", WHITE, 28 },
         { "\"Not As It Seems\" by Kevin MacLeod (incompetech.com), CC BY", WHITE, 28 },
         { "Flash engine", LINK_BLUE, 32 },
         { "Ruffle - ruffle.rs (MIT / Apache-2.0)", WHITE, 28 },
