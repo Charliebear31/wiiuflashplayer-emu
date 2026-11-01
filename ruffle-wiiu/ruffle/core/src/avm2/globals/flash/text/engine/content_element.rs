@@ -63,40 +63,31 @@ pub fn set_element_format<'gc>(
 }
 
 pub fn get_text_block<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(activation, "flash.text.engine.ContentElement", "textBlock");
-    Ok(Value::Null)
+    let this = this.as_object().unwrap().as_content_element_object().unwrap();
+    Ok(this.text_block().map_or(Value::Null, Value::from))
 }
 
 pub fn get_text_block_begin_index<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(
-        activation,
-        "flash.text.engine.ContentElement",
-        "textBlockBeginIndex"
-    );
-    Ok((-1).into())
+    let this = this.as_object().unwrap().as_content_element_object().unwrap();
+    Ok(this.block_begin_index().map_or(-1, |i| i as i32).into())
 }
 
 pub fn get_group_element<'gc>(
-    activation: &mut Activation<'_, 'gc>,
-    _this: Value<'gc>,
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
     _args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(
-        activation,
-        "flash.text.engine.ContentElement",
-        "groupElement"
-    );
-    Ok(Value::Null)
+    let this = this.as_object().unwrap().as_content_element_object().unwrap();
+    Ok(this.group().map_or(Value::Null, Value::from))
 }
-
 pub fn get_event_mirror<'gc>(
     activation: &mut Activation<'_, 'gc>,
     this: Value<'gc>,
@@ -181,6 +172,5 @@ pub fn get_raw_text<'gc>(
     this: Value<'gc>,
     args: FunctionArgs<'_, 'gc>,
 ) -> Result<Value<'gc>, Error<'gc>> {
-    avm2_stub_getter!(activation, "flash.text.engine.ContentElement", "rawText");
     get_text(activation, this, args)
 }

@@ -11,6 +11,8 @@ unsafe extern "C" {
     /// Premultiplied RGBA8 rows, `stride` bytes apart. `rgba` may be null (texture starts transparent).
     pub fn host_tex_create(w: u32, h: u32, rgba: *const u8, stride: u32) -> u32;
     pub fn host_tex_update(id: u32, x: u32, y: u32, w: u32, h: u32, rgba: *const u8, stride: u32);
+    /// A smaller version of a Stage3D texture, for mipmapping (level 1 is half the size, and so on).
+    pub fn host_tex_mip(id: u32, level: u32, w: u32, h: u32, rgba: *const u8, stride: u32);
     pub fn host_tex_free(id: u32);
     /// Reads `w`x`h` premultiplied RGBA8 from texture `id` at (x, y) into `out` (stride w*4).
     pub fn host_tex_read(id: u32, x: u32, y: u32, w: u32, h: u32, out: *mut u8);

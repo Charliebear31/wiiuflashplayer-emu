@@ -847,16 +847,15 @@ pub fn set_sampler_state_at<'gc>(
             );
         }
 
-        if &*mip_filter != b"mipnone" {
-            avm2_stub_method!(
-                activation,
-                "flash.display3D.Context3D",
-                "setSamplerStateAt",
-                "mipFilter != 'none'"
-            );
-        }
+        let mip_filter = if &*mip_filter == b"mipnearest" {
+            1
+        } else if &*mip_filter == b"miplinear" {
+            2
+        } else {
+            0
+        };
 
-        context.set_sampler_state_at(sampler, wrap, filter);
+        context.set_sampler_state_at(sampler, wrap, filter, mip_filter);
     }
     Ok(Value::Undefined)
 }

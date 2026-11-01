@@ -26,6 +26,12 @@ void gfx_mesh_free(uint32_t id);
 // rgba: RGBA8 rows (stride bytes apart), or NULL for a transparent texture.
 uint32_t gfx_tex_create(uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride);
 void gfx_tex_update(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride);
+#ifdef __WIIU__
+uint8_t* gfx_tex_update_begin(uint32_t id, uint32_t x, uint32_t y, uint32_t* pitch);
+void gfx_tex_update_end(uint32_t id, uint32_t y, uint32_t h);
+#endif
+void rw_core_collect(void);
+void gfx_tex_mip(uint32_t id, uint32_t level, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride);
 void gfx_tex_free(uint32_t id);
 void gfx_tex_read(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* out);
 // Runs a command list into the screen (target 0) or a texture.

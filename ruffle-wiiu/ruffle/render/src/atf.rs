@@ -31,6 +31,13 @@ pub enum ATFTextureData {
         etc1: Vec<u8>,
         etc2: Vec<u8>,
     },
+    CompressedRaw {
+        dxt1: Vec<u8>,
+    },
+    Compressed {
+        dxt1_lookup_compressed: Vec<u8>,
+        jpegxr_bgr: Vec<u8>,
+    },
 }
 
 #[derive(FromPrimitive, Debug)]
@@ -130,7 +137,7 @@ impl ATFTexture {
 
                         for _ in 0..12 {
                             let len = read_len(bytes)? as usize;
-                            *bytes = &bytes[len..];
+                            *bytes = bytes.get(len..).ok_or("ATF record past the end")?;
                         }
 
                         face_mip_data[face].push(ATFTextureData::CompressedAlpha {
@@ -164,27 +171,57 @@ impl ATFTexture {
                             etc2,
                         });
                     }
+                    ATFFormat::RawCompressed => {
+                        // DXT1, PVRTC, ETC1, ETC2: only the first is used here.
+                        let dxt1_len = read_len(bytes)? as usize;
+                        let mut dxt1 = vec![0; dxt1_len];
+                        bytes.read_exact(&mut dxt1)?;
+                        for _ in 0..3 {
+                            let len = read_len(bytes)? as usize;
+                            *bytes = bytes.get(len..).ok_or("ATF record past the end")?;
+                        }
+                        face_mip_data[face].push(ATFTextureData::CompressedRaw { dxt1 });
+                    }
                     _ => {
-                        // All of the formats consist of a number of (u32_length, data[u32_length]) records.
-                        // For now, we just combine them into a single buffer to allow parsing to succeed.
+                        // Records in order: the DXT ones (see adobe/dds2atf), then PVRTC, ETC1 and ETC2, which aren't used here.
+                        // The lossy formats have one record more, and no public description: their DXT records
+                        // are taken to come first in the same way, and the upload fails cleanly if they don't fit.
                         let num_records = match format {
-                            ATFFormat::RawCompressed | ATFFormat::RawCompressedAlpha => 4,
                             ATFFormat::Compressed => 11,
                             ATFFormat::CompressedLossy => 12,
                             ATFFormat::CompressedLossyAlpha => 17,
                             ATFFormat::RGB888
                             | ATFFormat::RGBA8888
+                            | ATFFormat::RawCompressed
+                            | ATFFormat::RawCompressedAlpha
                             | ATFFormat::CompressedAlpha => unreachable!(),
                         };
 
-                        let mut all_data = vec![];
+                        let mut records = Vec::with_capacity(num_records);
                         for _ in 0..num_records {
                             let len = read_len(bytes)? as usize;
-                            let orig_len = all_data.len();
-                            all_data.resize(orig_len + len, 0);
-                            bytes.read_exact(&mut all_data[orig_len..])?;
+                            let mut record = vec![0; len];
+                            bytes.read_exact(&mut record)?;
+                            records.push(record);
                         }
-                        face_mip_data[face].push(ATFTextureData::Unknown(all_data));
+                        let mut records = records.into_iter();
+                        let mut next = || records.next().unwrap_or_default();
+                        face_mip_data[face].push(if matches!(format, ATFFormat::CompressedLossyAlpha) {
+                            let dxt1_alpha_compressed = next();
+                            let jpegxr_alpha = next();
+                            let dxt5_rgb_compressed = next();
+                            let jpegxr_bgr = next();
+                            ATFTextureData::CompressedAlpha {
+                                jpegxr_alpha,
+                                dxt1_alpha_compressed,
+                                jpegxr_bgr,
+                                dxt5_rgb_compressed,
+                            }
+                        } else {
+                            let dxt1_lookup_compressed = next();
+                            let jpegxr_bgr = next();
+                            ATFTextureData::Compressed { dxt1_lookup_compressed, jpegxr_bgr }
+                        });
                     }
                 }
             }

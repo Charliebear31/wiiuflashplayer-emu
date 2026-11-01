@@ -53,7 +53,7 @@ pub use avm2_button::Avm2Button;
 pub use bitmap::{Bitmap, BitmapClass};
 #[allow(unused)]
 pub use edit_text::LayoutDebugBoxesFlag;
-pub use edit_text::{AutoSizeMode, EditText, TextSelection};
+pub use edit_text::{AutoSizeMode, EDIT_TEXT_GUTTER, EditText, TextSelection};
 pub use graphic::Graphic;
 pub use interactive::{Avm2MousePick, InteractiveObject, TInteractiveObject};
 pub use loader_display::LoaderDisplay;
@@ -66,7 +66,7 @@ use ruffle_render::commands::{CommandHandler, CommandList, RenderBlendMode};
 use ruffle_render::filters::Filter;
 pub use stage::{Stage, StageAlign, StageDisplayState, StageScaleMode, WindowMode};
 pub use text::{Text, TextSnapshot};
-pub use text_line::TextLine;
+pub use text_line::{LineGraphic, TextLine};
 pub use video::Video;
 
 use self::loader_display::LoaderDisplayWeak;

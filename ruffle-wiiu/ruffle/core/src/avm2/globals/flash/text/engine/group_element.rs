@@ -205,9 +205,16 @@ fn replace_elements_impl<'gc>(
 
     // This crash affects at least both `replaceElements` and `setElements`.
 
+    for element in &new_elements {
+        element.set_group(Some(this), activation.gc());
+    }
+
     let removed_elements = elements
         .splice(begin_index..end_index, new_elements)
-        .map(Value::from)
+        .map(|element| {
+            element.set_group(None, activation.gc());
+            Value::from(element)
+        })
         .collect::<Vec<_>>();
 
     // Return the elements that were removed

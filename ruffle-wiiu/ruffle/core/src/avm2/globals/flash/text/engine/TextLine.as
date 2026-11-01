@@ -1,11 +1,8 @@
 package flash.text.engine {
-    import __ruffle__.stub_getter;
-    import __ruffle__.stub_setter;
-    import __ruffle__.stub_method;
-
     import flash.display.DisplayObject;
     import flash.display.DisplayObjectContainer;
     import flash.errors.IllegalOperationError;
+    import flash.geom.Point;
     import flash.geom.Rectangle;
     import flash.ui.ContextMenu;
 
@@ -32,7 +29,6 @@ package flash.text.engine {
 
         [API("670")]
         public function get totalAscent():Number {
-            stub_getter("flash.text.engine.TextLine", "totalAscent");
             return this.ascent;
         }
 
@@ -40,13 +36,11 @@ package flash.text.engine {
 
         [API("670")]
         public function get totalDescent():Number {
-            stub_getter("flash.text.engine.TextLine", "totalDescent");
             return this.descent;
         }
 
         public function get unjustifiedTextWidth():Number {
-            stub_getter("flash.text.engine.TextLine", "unjustifiedTextWidth");
-            return this.specifiedWidth;
+            return this.textWidth;
         }
 
         public native function get textWidth():Number;
@@ -55,78 +49,136 @@ package flash.text.engine {
         public native function get validity():String;
         public native function set validity(value:String):void;
 
-        public function get hasGraphicElement():Boolean {
-            stub_getter("flash.text.engine.TextLine", "hasGraphicElement");
-            return false;
+        public native function get hasGraphicElement():Boolean;
+
+        // A surrogate pair is one atom; any other code unit is one too. Gives the unit each atom starts at, then the end.
+        private function atomStarts():Array {
+            var starts:Array = [];
+            var text:String = this.textBlock && this.textBlock.content ? this.textBlock.content.rawText : null;
+            var begin:int = this.textBlockBeginIndex;
+            var end:int = begin + this.rawTextLength;
+            for (var i:int = begin; i < end; i++) {
+                starts.push(i);
+                if (text != null && i + 1 < end) {
+                    var unit:Number = text.charCodeAt(i);
+                    if (unit >= 0xD800 && unit <= 0xDBFF) {
+                        i++;
+                    }
+                }
+            }
+            starts.push(end);
+            return starts;
+        }
+
+        private function checkedAtom(index:int):Array {
+            var starts:Array = this.atomStarts();
+            if (index < 0 || index >= starts.length - 1) {
+                Error.throwError(RangeError, 2006);
+            }
+            return starts;
         }
 
         public function get atomCount():int {
-            stub_getter("flash.text.engine.TextLine", "atomCount");
-            return this.rawTextLength;
+            return this.atomStarts().length - 1;
         }
 
         public native function get previousLine():TextLine;
         public native function get nextLine():TextLine;
 
         public function getBaselinePosition(baseline:String):Number {
-            stub_method("flash.text.engine.TextLine", "getBaselinePosition");
+            switch (baseline) {
+                case TextBaseline.ROMAN:
+                    return 0.0;
+                case TextBaseline.ASCENT:
+                case TextBaseline.IDEOGRAPHIC_TOP:
+                    return -this.ascent;
+                case TextBaseline.DESCENT:
+                case TextBaseline.IDEOGRAPHIC_BOTTOM:
+                    return this.descent;
+                case TextBaseline.IDEOGRAPHIC_CENTER:
+                    return (this.descent - this.ascent) / 2;
+            }
+            Error.throwError(ArgumentError, 2004);
             return 0.0;
         }
 
         public native function get hasTabs():Boolean;
 
+        private native function charLeft(index:int):Number;
+        private native function charRight(index:int):Number;
+        private native function graphicAt(index:int):DisplayObject;
+
         public function getAtomIndexAtPoint(stageX:Number, stageY:Number):int {
-            stub_method("flash.text.engine.TextLine", "getAtomIndexAtPoint");
+            var local:Point = this.globalToLocal(new Point(stageX, stageY));
+            if (local.y < -this.ascent || local.y > this.descent) {
+                return -1;
+            }
+            var starts:Array = this.atomStarts();
+            var begin:int = this.textBlockBeginIndex;
+            for (var i:int = 0; i < starts.length - 1; i++) {
+                if (local.x >= this.charLeft(starts[i] - begin) && local.x < this.charRight(starts[i + 1] - 1 - begin)) {
+                    return i;
+                }
+            }
             return -1;
         }
 
         public function getAtomIndexAtCharIndex(charIndex:int):int {
-            stub_method("flash.text.engine.TextLine", "getAtomIndexAtCharIndex");
-            var index:int = charIndex - this.textBlockBeginIndex;
-            if (index < 0 || index >= this.rawTextLength) {
-                return -1;
+            var starts:Array = this.atomStarts();
+            for (var i:int = 0; i < starts.length - 1; i++) {
+                if (charIndex >= starts[i] && charIndex < starts[i + 1]) {
+                    return i;
+                }
             }
-            return index;
+            return -1;
         }
 
         public function getAtomBidiLevel(index:int):int {
-            stub_method("flash.text.engine.TextLine", "getAtomBidiLevel");
-            return 0;
+            this.checkedAtom(index);
+            return this.textBlock ? this.textBlock.bidiLevel : 0;
         }
 
         public function getAtomBounds(index:int):Rectangle {
-            stub_method("flash.text.engine.TextLine", "getAtomBounds");
-            return new Rectangle(0, 0, 0, 0);
+            var starts:Array = this.checkedAtom(index);
+            var begin:int = this.textBlockBeginIndex;
+            var left:Number = this.charLeft(starts[index] - begin);
+            var right:Number = this.charRight(starts[index + 1] - 1 - begin);
+            return new Rectangle(left, -this.ascent, right - left, this.ascent + this.descent);
         }
 
         public function getAtomCenter(index:int):Number {
-            stub_method("flash.text.engine.TextLine", "getAtomCenter");
-            return 1.0;
+            var bounds:Rectangle = this.getAtomBounds(index);
+            return bounds.x + bounds.width / 2;
         }
 
         public function getAtomGraphic(index:int):DisplayObject {
-            stub_method("flash.text.engine.TextLine", "getAtomGraphic");
-            return null;
+            var starts:Array = this.checkedAtom(index);
+            return this.graphicAt(starts[index] - this.textBlockBeginIndex);
         }
 
         public function getAtomTextBlockBeginIndex(index:int):int {
-            stub_method("flash.text.engine.TextLine", "getAtomTextBlockBeginIndex");
-            return 0;
+            return this.checkedAtom(index)[index];
         }
 
         public function getAtomTextBlockEndIndex(index:int):int {
-            stub_method("flash.text.engine.TextLine", "getAtomTextBlockEndIndex");
-            return 0;
+            return this.checkedAtom(index)[index + 1];
         }
 
         public function getAtomTextRotation(index:int):String {
-            stub_method("flash.text.engine.TextLine", "getAtomTextRotation");
+            this.checkedAtom(index);
             return TextRotation.ROTATE_0;
         }
 
         public function getAtomWordBoundaryOnLeft(index:int):Boolean {
-            stub_method("flash.text.engine.TextLine", "getAtomWordBoundaryOnLeft");
-            return false;
+            var starts:Array = this.checkedAtom(index);
+            if (index == 0) {
+                return true;
+            }
+            var text:String = this.textBlock && this.textBlock.content ? this.textBlock.content.rawText : null;
+            if (text == null) {
+                return false;
+            }
+            return text.charAt(starts[index - 1]) == " " && text.charAt(starts[index]) != " ";
         }
 
         // This function does nothing in Flash Player 32

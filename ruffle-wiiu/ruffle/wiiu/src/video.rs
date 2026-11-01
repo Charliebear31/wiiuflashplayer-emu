@@ -19,8 +19,11 @@ struct H264Stream {
     size: (u32, u32),
     /// How many bytes hold each unit's length (set by the configuration data).
     length_size: usize,
-    /// The stream's parameter sets, to send ahead of the next frame.
+    /// The stream's parameter sets, to send again if the decoder has to be opened again.
+    sets: Vec<u8>,
+    /// What to send ahead of the next frame.
     parameters: Vec<u8>,
+    last_used: u64,
 }
 
 impl Drop for H264Stream {
@@ -34,14 +37,45 @@ enum Stream {
     H264(H264Stream),
 }
 
+/// The engine never says a stream has ended, so a video that replays would keep adding decoders of about 40 MB each.
+const MAX_LIVE_DECODERS: usize = 2;
+
 pub struct HostVideoBackend {
     software: SoftwareVideoBackend,
     streams: SlotMap<VideoStreamHandle, Stream>,
+    clock: u64,
 }
 
 impl HostVideoBackend {
     pub fn new() -> Self {
-        Self { software: SoftwareVideoBackend::new(), streams: SlotMap::with_key() }
+        Self { software: SoftwareVideoBackend::new(), streams: SlotMap::with_key(), clock: 0 }
+    }
+
+    fn live_decoders(&mut self) -> impl Iterator<Item = &mut H264Stream> {
+        self.streams.values_mut().filter_map(|s| match s {
+            Stream::H264(h) if h.decoder != 0 => Some(h),
+            _ => None,
+        })
+    }
+
+    fn close_oldest_decoder(&mut self) -> bool {
+        let Some(s) = self.live_decoders().min_by_key(|s| s.last_used) else { return false };
+        unsafe { host::host_h264_close(s.decoder) }
+        s.decoder = 0;
+        s.parameters = s.sets.clone();
+        true
+    }
+
+    fn open_decoder(&mut self, w: u32, h: u32) -> u32 {
+        while self.live_decoders().count() >= MAX_LIVE_DECODERS {
+            self.close_oldest_decoder();
+        }
+        loop {
+            let decoder = unsafe { host::host_h264_open(w, h) };
+            if decoder != 0 || !self.close_oldest_decoder() {
+                return decoder;
+            }
+        }
     }
 }
 
@@ -55,16 +89,19 @@ impl VideoBackend for HostVideoBackend {
     ) -> Result<VideoStreamHandle, Error> {
         let stream = if codec == VideoCodec::H264 {
             let (w, h) = (size.0.max(1) as u32, size.1.max(1) as u32);
-            let decoder = unsafe { host::host_h264_open(w, h) };
+            let decoder = self.open_decoder(w, h);
             if decoder == 0 {
                 return Err(Error::UnsupportedCodec(codec));
             }
+            self.clock += 1;
             Stream::H264(H264Stream {
                 decoder,
                 bitmap: BitmapHandle(Arc::new(Texture::new_empty(w, h))),
                 size: (w, h),
                 length_size: 0,
+                sets: Vec::new(),
                 parameters: Vec::new(),
+                last_used: self.clock,
             })
         } else {
             Stream::Software(self.software.register_video_stream(num_frames, size, codec, filter)?)
@@ -86,6 +123,7 @@ impl VideoBackend for HostVideoBackend {
                     return Ok(());
                 }
                 s.length_size = (c[4] & 3) as usize + 1;
+                s.sets.clear();
                 s.parameters.clear();
                 let mut at = 5;
                 for _ in 0..2 {
@@ -101,11 +139,12 @@ impl VideoBackend for HostVideoBackend {
                         if at + len > c.len() {
                             return Ok(());
                         }
-                        s.parameters.extend_from_slice(&[0, 0, 0, 1]);
-                        s.parameters.extend_from_slice(&c[at..at + len]);
+                        s.sets.extend_from_slice(&[0, 0, 0, 1]);
+                        s.sets.extend_from_slice(&c[at..at + len]);
                         at += len;
                     }
                 }
+                s.parameters = s.sets.clone();
                 Ok(())
             }
         }
@@ -131,9 +170,22 @@ impl VideoBackend for HostVideoBackend {
         encoded_frame: EncodedFrame<'_>,
         renderer: &mut dyn RenderBackend,
     ) -> Result<BitmapInfo, Error> {
+        // A stream whose decoder was given up for another one gets one back (a clean picture needs the next key frame).
+        if let Some(Stream::H264(s)) = self.streams.get(stream)
+            && s.decoder == 0
+        {
+            let (w, h) = s.size;
+            let decoder = self.open_decoder(w, h);
+            if let Some(Stream::H264(s)) = self.streams.get_mut(stream) {
+                s.decoder = decoder;
+            }
+        }
+        self.clock += 1;
+        let clock = self.clock;
         match self.streams.get_mut(stream).ok_or(Error::VideoStreamIsNotRegistered)? {
             Stream::Software(inner) => self.software.decode_video_stream_frame(*inner, encoded_frame, renderer),
             Stream::H264(s) => {
+                s.last_used = clock;
                 // Length-prefixed units to start-code-prefixed ones, as the decoder wants.
                 let data = encoded_frame.data;
                 let mut annex = std::mem::take(&mut s.parameters);

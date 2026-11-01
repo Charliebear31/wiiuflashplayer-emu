@@ -1013,6 +1013,7 @@ impl Context3D for WgpuContext3D {
                 source_height,
                 dest,
                 layer,
+                mip_level: _,
             } => {
                 let dest = Rc::<dyn Any>::downcast::<TextureWrapper>(dest).unwrap();
 
@@ -1209,6 +1210,7 @@ impl Context3D for WgpuContext3D {
                 sampler,
                 wrap,
                 filter,
+                mip_filter: _,
             } => {
                 self.current_pipeline
                     .update_sampler_state_at(sampler as usize, wrap, filter);

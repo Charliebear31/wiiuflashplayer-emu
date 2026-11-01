@@ -9,18 +9,20 @@ use crate::display_object::interactive::{InteractiveObjectBase, TInteractiveObje
 use crate::display_object::{
     Avm2MousePick, BoundsMode, DisplayObjectBase, EditText, InteractiveObject,
 };
+use crate::display_object::EDIT_TEXT_GUTTER;
 use crate::events::{ClipEvent, ClipEventResult};
-use crate::fte::TextLineValidity;
+use crate::fte::{TextLineValidity, TextRotationValue};
 use crate::prelude::*;
 use crate::tag_utils::SwfMovie;
 use crate::vminterface::Instantiator;
 use core::fmt;
 use gc_arena::barrier::unlock;
-use gc_arena::lock::Lock;
+use gc_arena::lock::{Lock, RefLock};
 use gc_arena::{Collect, Gc, Mutation};
 use ruffle_common::utils::HasPrefixField;
 use std::cell::Cell;
-use swf::Twips;
+use ruffle_render::transform::Transform;
+use swf::{ColorTransform, Fixed8, Twips};
 
 #[derive(Clone, Collect, Copy)]
 #[collect(no_drop)]
@@ -32,6 +34,15 @@ impl fmt::Debug for TextLine<'_> {
             .field("ptr", &Gc::as_ptr(self.0))
             .finish()
     }
+}
+
+/// A `GraphicElement`'s place in a line.
+#[derive(Clone, Copy, Collect)]
+#[collect(no_drop)]
+pub struct LineGraphic<'gc> {
+    pub position: usize,
+    pub object: Option<DisplayObject<'gc>>,
+    pub height: f64,
 }
 
 #[derive(Collect, HasPrefixField)]
@@ -58,6 +69,11 @@ pub struct TextLineData<'gc> {
 
     previous_line: Lock<Option<TextLine<'gc>>>,
     next_line: Lock<Option<TextLine<'gc>>>,
+
+    line_rotation: Cell<TextRotationValue>,
+    baseline_shift: Cell<f64>,
+    text_alpha: Cell<f64>,
+    graphics: RefLock<Vec<LineGraphic<'gc>>>,
 }
 
 impl<'gc> TextLine<'gc> {
@@ -83,16 +99,25 @@ impl<'gc> TextLine<'gc> {
                 line_index: Cell::new(0),
                 previous_line: Lock::new(None),
                 next_line: Lock::new(None),
+                line_rotation: Cell::new(TextRotationValue::Rotate0),
+                baseline_shift: Cell::new(0.0),
+                text_alpha: Cell::new(1.0),
+                graphics: RefLock::new(Vec::new()),
             },
         ))
     }
 
-    pub fn reset_properties(self, mc: &Mutation<'gc>) {
-        // TODO: Reset more properties
+    pub fn reset_properties(self, context: &mut UpdateContext<'gc>) {
+        let mc = context.gc();
 
         // Reset display object properties
-        self.set_x(Twips::ZERO);
-        self.set_y(Twips::ZERO);
+        self.set_matrix(Matrix::IDENTITY);
+        self.set_color_transform(ColorTransform::default());
+        self.set_blend_mode(Default::default());
+        self.set_masker(mc, None, true);
+        self.set_opaque_background(None);
+        self.set_visible(context, true);
+        self.set_filters(Box::new([]));
 
         // Reset text line properties
         self.set_validity(TextLineValidity::Valid, mc);
@@ -146,6 +171,56 @@ impl<'gc> TextLine<'gc> {
         self.set_text_block(None, mc);
         self.set_previous_line(None, mc);
         self.set_next_line(None, mc);
+    }
+
+    pub fn set_line_rotation(self, value: TextRotationValue) {
+        self.0.line_rotation.set(value);
+    }
+
+    pub fn set_baseline_shift(self, value: f64) {
+        self.0.baseline_shift.set(value);
+    }
+
+    pub fn set_text_alpha(self, value: f64) {
+        self.0.text_alpha.set(value);
+    }
+
+    pub fn set_graphics(self, value: Vec<LineGraphic<'gc>>, mc: &Mutation<'gc>) {
+        *unlock!(Gc::write(mc, self.0), TextLineData, graphics).borrow_mut() = value;
+    }
+
+    pub fn has_graphics(self) -> bool {
+        !self.0.graphics.borrow().is_empty()
+    }
+
+    pub fn graphic_at(self, position: usize) -> Option<DisplayObject<'gc>> {
+        self.0.graphics.borrow().iter().find(|g| g.position == position).and_then(|g| g.object)
+    }
+
+    /// The left and right edges of a character, from the line's origin.
+    pub fn char_x(self, position: usize) -> Option<(f64, f64)> {
+        let bounds = self.0.fallback.char_bounds(position)?;
+        Some(((bounds.x_min - EDIT_TEXT_GUTTER).to_pixels(), (bounds.x_max - EDIT_TEXT_GUTTER).to_pixels()))
+    }
+
+    fn rotation_matrix(self) -> Matrix {
+        let (cos, sin) = match self.0.line_rotation.get() {
+            TextRotationValue::Rotate90 => (0.0, 1.0),
+            TextRotationValue::Rotate180 => (-1.0, 0.0),
+            TextRotationValue::Rotate270 => (0.0, -1.0),
+            _ => (1.0, 0.0),
+        };
+        Matrix { a: cos, b: sin, c: -sin, d: cos, tx: Twips::ZERO, ty: Twips::ZERO }
+    }
+
+    /// A line's origin is on its baseline, at the start of its text, and turns with the line.
+    fn origin_matrix(self) -> Matrix {
+        let (ascent, _) = self.metrics();
+        self.rotation_matrix()
+            * Matrix::translate(
+                -EDIT_TEXT_GUTTER,
+                -EDIT_TEXT_GUTTER - Twips::from_pixels(ascent + self.0.baseline_shift.get()),
+            )
     }
 
     pub fn measure_text(self, context: &mut UpdateContext<'gc>) -> (Twips, Twips) {
@@ -290,12 +365,44 @@ impl<'gc> TDisplayObject<'gc> for TextLine<'gc> {
     fn replace_with(self, _context: &mut UpdateContext<'gc>, _id: CharacterId) {}
 
     fn render_self(self, context: &mut RenderContext<'_, 'gc>) {
+        context.transform_stack.push(&Transform {
+            matrix: self.origin_matrix(),
+            color_transform: ColorTransform {
+                a_multiply: Fixed8::from_f64(self.0.text_alpha.get()),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
         self.0.fallback.render_self(context);
+        let graphics = self.0.graphics.borrow().clone();
+        let (ascent, _) = self.metrics();
+        for graphic in graphics {
+            let (Some(object), Some(bounds)) = (graphic.object, self.0.fallback.char_bounds(graphic.position)) else {
+                continue;
+            };
+            context.transform_stack.push(&Transform {
+                matrix: Matrix::translate(
+                    bounds.x_min,
+                    EDIT_TEXT_GUTTER + Twips::from_pixels(ascent - graphic.height),
+                ),
+                ..Default::default()
+            });
+            object.render(context);
+            context.transform_stack.pop();
+        }
+        context.transform_stack.pop();
     }
 
-    fn self_bounds(self, mode: BoundsMode) -> Rectangle<Twips> {
-        self.0.fallback.self_bounds(mode)
-    }
+    fn self_bounds(self, _mode: BoundsMode) -> Rectangle<Twips> {
+        let width = self.0.fallback.layout().text_size().width();
+        let (ascent, descent) = self.metrics();
+        self.rotation_matrix()
+            * Rectangle {
+                x_min: Twips::ZERO,
+                x_max: width,
+                y_min: Twips::from_pixels(-ascent),
+                y_max: Twips::from_pixels(descent),
+            }    }
 
     fn hit_test_shape(
         self,

@@ -346,6 +346,7 @@ impl<'gc> Context3DObject<'gc> {
         source: &BitmapRawData<'gc>,
         dest: Rc<dyn Texture>,
         layer: u32,
+        mip_level: u32,
     ) {
         // Note - Flash appears to allow a source that's larger than the destination.
         // Let's leave in this assertion to see if there any real SWFS relying on this
@@ -370,19 +371,21 @@ impl<'gc> Context3DObject<'gc> {
                 source_height: source.height(),
                 dest,
                 layer,
+                mip_level,
             })
         });
     }
 
     #[cfg_attr(not(feature = "jpegxr"), allow(unused))]
-    pub(crate) fn copy_pixels_to_texture(self, source: Vec<u8>, dest: Rc<dyn Texture>, layer: u32) {
+    pub(crate) fn copy_pixels_to_texture(self, source: Vec<u8>, dest: Rc<dyn Texture>, layer: u32, mip_level: u32) {
         self.with_context_3d(|ctx| {
             ctx.process_command(Context3DCommand::CopyBitmapToTexture {
                 source: &source,
-                source_width: dest.width(),
-                source_height: dest.height(),
+                source_width: (dest.width() >> mip_level).max(1),
+                source_height: (dest.height() >> mip_level).max(1),
                 dest,
                 layer,
+                mip_level,
             })
         });
     }
@@ -447,12 +450,14 @@ impl<'gc> Context3DObject<'gc> {
         sampler: u32,
         wrap: ruffle_render::backend::Context3DWrapMode,
         filter: ruffle_render::backend::Context3DTextureFilter,
+        mip_filter: u32,
     ) {
         self.with_context_3d(|ctx| {
             ctx.process_command(Context3DCommand::SetSamplerStateAt {
                 sampler,
                 wrap,
                 filter,
+                mip_filter,
             })
         });
     }

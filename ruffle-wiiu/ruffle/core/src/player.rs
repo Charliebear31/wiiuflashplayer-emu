@@ -2058,6 +2058,11 @@ impl Player {
     }
 
     #[instrument(level = "debug", skip_all)]
+    /// Frees everything the game no longer uses now, rather than a little each frame.
+    pub fn collect_garbage(&mut self) {
+        self.gc_arena.borrow_mut().finish_cycle();
+    }
+
     pub fn run_frame(&mut self) {
         let frame_time = self.frame_time(750_000_000.0);
         let frame_time = Duration::from_nanos(frame_time as u64);

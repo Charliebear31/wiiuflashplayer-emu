@@ -29,7 +29,7 @@ pub fn do_compressed_upload<'gc>(
 
     match &atf_texture.face_mip_data[0][0] {
         ATFTextureData::CompressedRawAlpha { dxt5, .. } if !dxt5.is_empty() => {
-            texture.context3d().copy_pixels_to_texture(dxt5.clone(), texture.handle(), 0);
+            texture.context3d().copy_pixels_to_texture(dxt5.clone(), texture.handle(), 0, 0);
             Ok(())
         }
         _ => Err(format!("ATF format {:?} needs the JPEG-XR decoder, which is not compiled in", atf_texture.format).into()),

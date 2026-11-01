@@ -67,7 +67,12 @@ pub fn upload_compressed_texture_from_byte_array<'gc>(
         );
     }
 
-    if !matches!(texture.original_format(), Context3DTextureFormat::Bgra) {
+    if !matches!(
+        texture.original_format(),
+        Context3DTextureFormat::Bgra
+            | Context3DTextureFormat::Compressed
+            | Context3DTextureFormat::CompressedAlpha
+    ) {
         avm2_stub_method!(
             activation,
             "flash.display3D.textures.CubeTexture",
@@ -100,6 +105,7 @@ pub fn upload_from_bitmap_data<'gc>(
                     texture.handle(),
                     // FIXME - is this right?
                     side,
+                    0,
                 );
             } else {
                 avm2_stub_method!(

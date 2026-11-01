@@ -88,6 +88,16 @@ fn to_glsl(module: &naga::Module) -> Result<(String, u32), String> {
     Ok((flatten_shader(&crate::context3d::blocks_to_plain_uniforms(&out)), linear_mask))
 }
 
+/// Writes `cross(a, b)` out as arithmetic: with it, BlurredFocus came out green even where both inputs were zero.
+fn expand_cross(line: &str) -> String {
+    let Some((before, rest)) = line.split_once("cross(") else { return line.to_string() };
+    let Some((args, after)) = rest.split_once(')') else { return line.to_string() };
+    let Some((a, b)) = args.split_once(", ") else { return line.to_string() };
+    format!(
+        "{before}vec3({a}.y * {b}.z - {a}.z * {b}.y, {a}.z * {b}.x - {a}.x * {b}.z, {a}.x * {b}.y - {a}.y * {b}.x){after}"
+    )
+}
+
 /// Makes the shader straight-line code. The compiler hung in Cemu on `if` blocks and on functions taking a sampler
 /// (the same source compiles in 50 ms on a PC), and a shader has no side effects, so both branches can always be
 /// worked out: each assignment in a branch becomes `x = condition ? value : x`.
@@ -107,7 +117,7 @@ fn flatten_shader(src: &str) -> String {
             }
             continue;
         }
-        let line = line.replace("sampler_wrapper(", "texture(");
+        let line = expand_cross(&line.replace("sampler_wrapper(", "texture("));
         let t = line.trim();
         if let Some(rest) = t.strip_prefix("if ") {
             let cond = rest.trim_end_matches('{').trim();

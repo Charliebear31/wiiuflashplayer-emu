@@ -257,6 +257,10 @@ uint32_t gfx_tex_create(uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t st
     return id;
 }
 
+void gfx_tex_mip(uint32_t id, uint32_t level, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
+    (void)id; (void)level; (void)w; (void)h; (void)rgba; (void)stride; // (the PC test host samples the full-size picture)
+}
+
 void gfx_tex_update(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
     (void)stride;
     if (id >= g_ntexs || !g_texs[id].used) return;
@@ -383,7 +387,7 @@ static void set_blend(uint32_t mode) {
     case 6: eq = GL_MIN; dst = GL_ONE; break;                           // darken
     case 8: dst = GL_ONE; break;                                        // add
     case 9: eq = GL_FUNC_REVERSE_SUBTRACT; dst = GL_ONE; break;         // subtract
-    case 10: src = GL_ONE_MINUS_DST_COLOR; dst = GL_ZERO; break;        // invert
+    case 10: src = GL_ONE_MINUS_DST_COLOR; dst = GL_ONE_MINUS_SRC_COLOR; break; // invert (what's see-through stays)
     case 11: src = GL_ZERO; dst = GL_SRC_ALPHA; break;                  // alpha
     case 12: src = GL_ZERO; dst = GL_ONE_MINUS_SRC_ALPHA; break;        // erase
     case 255:                                                           // opaque copy (Stage3D layer)
@@ -658,7 +662,7 @@ void gfx_c3d_draw(const uint32_t* w, uint32_t n) {
             continue;
         }
         glBindTexture(GL_TEXTURE_2D, g_texs[tx[0]].tex);
-        GLint filter = tx[3] ? GL_LINEAR : GL_NEAREST;
+        GLint filter = (tx[3] & 1) ? GL_LINEAR : GL_NEAREST;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
         int ru = tx[2] == 1 || tx[2] == 3, rv = tx[2] == 1 || tx[2] == 2;

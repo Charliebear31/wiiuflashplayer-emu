@@ -156,10 +156,40 @@ u32 w2c_rw_host_tex_create(struct w2c_rw* rw, u32 w, u32 h, u32 rgba, u32 stride
 void w2c_rw_host_tex_update(struct w2c_rw* rw, u32 id, u32 x, u32 y, u32 w, u32 h, u32 rgba, u32 stride) {
     (void)rw;
     if (h && !in_bounds(rgba, stride * (h - 1) + w * 4)) return;
+#ifdef __WIIU__
+    // Straight into the picture: going through a copy cost as much again in games updating big pictures every frame.
+    uint32_t pitch;
+    uint8_t* d = gfx_tex_update_begin(id, x, y, &pitch);
+    if (!d) return;
+    for (u32 row = 0; row < h; row++) copy_out(d + (size_t)row * pitch, rgba + row * stride, w * 4);
+    gfx_tex_update_end(id, y, h);
+#else
     uint8_t* p = pixels_out(rgba, w, h, stride);
     if (!p) return;
     gfx_tex_update(id, x, y, w, h, p, w * 4);
     free(p);
+#endif
+}
+
+void w2c_rw_host_tex_mip(struct w2c_rw* rw, u32 id, u32 level, u32 w, u32 h, u32 rgba, u32 stride) {
+    (void)rw;
+    if (!h || !in_bounds(rgba, stride * (h - 1) + w * 4)) return;
+    uint8_t* p = pixels_out(rgba, w, h, stride);
+    if (!p) return;
+    gfx_tex_mip(id, level, w, h, p, w * 4);
+    free(p);
+}
+
+// Fills `count` words of wasm memory with one value: as a wasm loop this was a large part of BitmapData.fillRect.
+void w2c_rw_host_fill_words(struct w2c_rw* rw, u32 addr, u32 count, u32 value) {
+    (void)rw;
+    if (!in_bounds(addr, count * 4)) return;
+#if WABT_BIG_ENDIAN
+    uint32_t* d = (uint32_t*)(mem()->data_end - addr - count * 4);
+#else
+    uint32_t* d = (uint32_t*)(mem()->data + addr);
+#endif
+    for (u32 i = 0; i < count; i++) d[i] = value;
 }
 
 void w2c_rw_host_tex_free(struct w2c_rw* rw, u32 id) { (void)rw; gfx_tex_free(id); }
@@ -851,6 +881,11 @@ void rw_core_audio(int16_t* out, uint32_t frames) {
         out[i * 2] = (int16_t)(v & 0xffff);
         out[i * 2 + 1] = (int16_t)(v >> 16);
     }
+}
+
+void rw_core_collect(void) {
+    TRY();
+    w2c_flashplayer_rw_collect(&g_inst);
 }
 
 uint32_t rw_core_audio_rate(void) {

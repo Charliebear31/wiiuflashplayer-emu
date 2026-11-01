@@ -8,6 +8,7 @@ mod host;
 mod navigator;
 mod pixel_bender;
 mod render;
+mod site;
 mod storage;
 mod ui;
 mod video;
@@ -98,11 +99,16 @@ pub extern "C" fn rw_start(url: *const u8, url_len: u32, width: u32, height: u32
     let Ok(url) = std::str::from_utf8(url) else {
         return 1;
     };
-    // "<movie url>\n<spoofed url>": the address sitelocked games are told they run from.
-    let (url, spoof) = match url.split_once('\n') {
-        Some((url, spoof)) if !spoof.is_empty() => (url, Some(spoof.to_string())),
-        _ => (url, None),
-    };
+    // "<movie url>\n<spoofed url>\n<web page>": the address sitelocked games are told they run from, and the page
+    // that embeds a game saved with its website. Either can be empty.
+    let mut lines = url.split('\n');
+    let url = lines.next().unwrap_or("");
+    let spoof = lines.next().filter(|s| !s.is_empty()).map(str::to_string);
+    let settings = lines.next().filter(|s| !s.is_empty()).map_or_else(Vec::new, |page| {
+        let settings = site::page_settings(page, url);
+        host::log(2, &format!("{page}: {} settings for the game", settings.len()));
+        settings
+    });
     let executor = NullExecutor::new();
     let navigator = navigator::HostNavigator::new(executor.spawner(), url);
     let (audio, proxy) = audio::HostAudioBackend::new();
@@ -125,7 +131,7 @@ pub extern "C" fn rw_start(url: *const u8, url_len: u32, width: u32, height: u32
     host::log(2, &format!("rw_start {url} {width}x{height}"));
     player.lock().unwrap().fetch_root_movie(
         url.to_string(),
-        vec![],
+        settings,
         Box::new(|header| {
             host::log(
                 2,
@@ -159,6 +165,14 @@ pub extern "C" fn rw_tick(dt_ms: f64) -> i32 {
     drop(player);
     s.executor.run();
     s.player.lock().unwrap().needs_render() as i32
+}
+
+/// Frees all the memory the game no longer uses, for when it's nearly out.
+#[unsafe(no_mangle)]
+pub extern "C" fn rw_collect() {
+    if let Some(s) = state() {
+        s.player.lock().unwrap().collect_garbage();
+    }
 }
 
 /// How much of the root movie has been loaded, 0..=1000 (1000 = fully loaded).

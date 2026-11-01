@@ -1,3 +1,21 @@
+#[cfg(target_os = "wasi")]
+#[link(wasm_import_module = "rw")]
+unsafe extern "C" {
+    fn host_fill_words(addr: *mut Color, count: u32, value: u32);
+}
+
+/// On the Wii U host a fill runs natively: as a wasm loop it was up to a fifth of some games' time.
+#[inline]
+fn fill_colors(pixels: &mut [Color], color: Color) {
+    #[cfg(target_os = "wasi")]
+    if pixels.len() >= 16 {
+        let value: u32 = bytemuck::cast(color);
+        unsafe { host_fill_words(pixels.as_mut_ptr(), pixels.len() as u32, value) };
+        return;
+    }
+    pixels.fill(color);
+}
+
 use crate::avm2::object::BitmapDataObject;
 use crate::context::RenderContext;
 use crate::display_object::{BoundsMode, DisplayObject, DisplayObjectWeak, TDisplayObject};
@@ -886,13 +904,12 @@ impl<'gc> BitmapRawData<'gc> {
     pub fn set_pixel32_row_raw(&mut self, x1: u32, x2: u32, y: u32, color: Color) {
         let p1 = (x1 + y * self.width) as usize;
         let p2 = (x2 + y * self.width) as usize;
-        let slice = &mut self.pixels[p1..p2];
-        slice.fill(color);
+        fill_colors(&mut self.pixels[p1..p2], color);
     }
 
     #[inline]
     pub fn fill(&mut self, color: Color) {
-        self.pixels.fill(color);
+        fill_colors(&mut self.pixels, color);
     }
 
     #[inline]

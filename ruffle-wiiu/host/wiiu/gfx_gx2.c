@@ -47,6 +47,8 @@ typedef struct {
     int has_target;
     int used;
     uint32_t drawn_epoch; // when a draw last read it (see gfx_tex_update)
+    int target_dirty;     // drawn into, and may not have reached memory yet (see settle_target)
+    uint32_t mips_loaded; // bit n: mip level n + 1 has been uploaded (see gfx_tex_mip)
 } Tex;
 
 static Mesh* g_meshes;
@@ -383,6 +385,7 @@ static void set_tex_surface(Tex* t, uint32_t w, uint32_t h) {
 }
 
 static void make_target(Tex* t) {
+    t->target_dirty = 1; // (every draw into a picture comes through here)
     if (t->has_target) return;
     memset(&t->cb, 0, sizeof(t->cb));
     t->cb.surface = t->tex.surface;
@@ -409,6 +412,7 @@ static void make_target(Tex* t) {
 
 static void free_tex(Tex* t) {
     defer_free(t->tex.surface.image);
+    if (t->tex.surface.mipmaps) defer_free(t->tex.surface.mipmaps);
     if (t->has_target) defer_free(t->db.surface.image);
     memset(t, 0, sizeof(*t));
 }
@@ -491,13 +495,19 @@ void gfx_mesh_free(uint32_t id) {
     memset(&g_meshes[id], 0, sizeof(Mesh));
 }
 
+// Only the rows written leave the CPU cache: Moto X3M updates 1.3 MB of pictures a frame.
+static void pixels_written(Tex* t, uint32_t y, uint32_t h) {
+    uint32_t pitch = t->tex.surface.pitch * 4;
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, (uint8_t*)t->tex.surface.image + (size_t)y * pitch, (size_t)h * pitch);
+}
+
 static void write_pixels(Tex* t, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
     uint8_t* img = (uint8_t*)t->tex.surface.image;
     if (!img) return;
     uint32_t pitch = t->tex.surface.pitch * 4;
     for (uint32_t row = 0; row < h; row++)
         memcpy(img + (size_t)(y + row) * pitch + x * 4, rgba + (size_t)row * stride, (size_t)w * 4);
-    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, img, t->tex.surface.imageSize);
+    pixels_written(t, y, h);
 }
 
 uint32_t gfx_tex_create(uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
@@ -521,14 +531,97 @@ uint32_t gfx_tex_create(uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t st
     return id;
 }
 
-void gfx_tex_update(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
-    if (id >= g_ntexs || !g_texs[id].used) return;
-    // The GPU may still be reading this texture for an earlier draw: wait only as long as that needs. A full
-    // wait here (which includes the TV's refresh) cost games that update a bitmap every frame a whole frame.
-    Tex* t = &g_texs[id];
+// The GPU writes a picture out in square blocks, which can sit in its colour cache: the CPU touching the memory
+// before they arrive saw black blocks (console only; Moto X3M's beach, which is read back and then copied around).
+static void settle_target(Tex* t) {
+    if (!t->target_dirty) return;
+    t->target_dirty = 0;
+    GX2Invalidate(GX2_INVALIDATE_MODE_COLOR_BUFFER, t->tex.surface.image, t->tex.surface.imageSize);
+    gpu_sync();
+}
+
+// The GPU may still be reading this texture for an earlier draw: wait only as long as that needs. A full
+// wait here (which includes the TV's refresh) cost games that update a bitmap every frame a whole frame.
+static void prepare_update(Tex* t) {
+    settle_target(t);
     if (t->drawn_epoch == g_epoch || g_c3d_drew) gpu_sync();
     else if (t->drawn_epoch && t->drawn_epoch == g_prev_epoch) gpu_wait_last_frame();
+}
+
+void gfx_tex_update(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
+    if (id >= g_ntexs || !g_texs[id].used) return;
+    Tex* t = &g_texs[id];
+    prepare_update(t);
     write_pixels(t, x, y, w, h, rgba, stride);
+}
+
+// A picture gets the memory for its smaller versions when a game first uploads one: most never do.
+static int add_mip_chain(Tex* t) {
+    GX2Surface* surface = &t->tex.surface;
+    if (surface->tileMode != GX2_TILE_MODE_LINEAR_ALIGNED || surface->format != GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8) return 0;
+    uint32_t largest = surface->width > surface->height ? surface->width : surface->height, levels = 1;
+    while (largest >> levels) levels++;
+    if (levels < 2) return 0;
+    GX2Surface chain = *surface;
+    chain.mipLevels = levels;
+    GX2CalcSurfaceSizeAndAlignment(&chain);
+    if (chain.pitch != surface->pitch || !chain.mipmapSize) return 0; // (the full-size picture can't move)
+    void* mips = gpu_alloc(chain.mipmapSize, chain.alignment);
+    if (!mips) return 0;
+    memset(mips, 0, chain.mipmapSize);
+    surface->mipLevels = levels;
+    surface->mipmapSize = chain.mipmapSize;
+    memcpy(surface->mipLevelOffset, chain.mipLevelOffset, sizeof(surface->mipLevelOffset));
+    surface->mipmaps = mips;
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, mips, chain.mipmapSize);
+    return 1;
+}
+
+void gfx_tex_mip(uint32_t id, uint32_t level, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride) {
+    if (id >= g_ntexs || !g_texs[id].used || !level || level > 13) return;
+    Tex* t = &g_texs[id];
+    GX2Surface* surface = &t->tex.surface;
+    prepare_update(t);
+    if (!surface->mipmaps && !add_mip_chain(t)) return;
+    if (level >= surface->mipLevels) return;
+
+    // Level 1 starts the block; mipLevelOffset[n - 1] places the others in it. A level's rows are as far apart as
+    // those of a picture of its own size.
+    GX2Surface own = *surface;
+    own.width = surface->width >> level ? surface->width >> level : 1;
+    own.height = surface->height >> level ? surface->height >> level : 1;
+    own.mipLevels = 1;
+    GX2CalcSurfaceSizeAndAlignment(&own);
+    if (w > own.width) w = own.width;
+    if (h > own.height) h = own.height;
+    uint32_t offset = level == 1 ? 0 : surface->mipLevelOffset[level - 1];
+    uint32_t pitch = own.pitch * 4;
+    if (offset + (size_t)own.height * pitch > surface->mipmapSize) return;
+    uint8_t* dst = (uint8_t*)surface->mipmaps + offset;
+    for (uint32_t row = 0; row < h; row++) memcpy(dst + (size_t)row * pitch, rgba + (size_t)row * stride, (size_t)w * 4);
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, dst, (size_t)own.height * pitch);
+
+    // Only an unbroken run of levels can be sampled.
+    t->mips_loaded |= 1u << (level - 1);
+    uint32_t usable = 1;
+    while (usable < surface->mipLevels && (t->mips_loaded >> (usable - 1) & 1)) usable++;
+    if (usable != t->tex.viewNumMips) {
+        t->tex.viewNumMips = usable;
+        GX2InitTextureRegs(&t->tex);
+    }
+}
+
+// For writing straight into a picture, without a copy in between: where its first row goes and the bytes between rows.
+uint8_t* gfx_tex_update_begin(uint32_t id, uint32_t x, uint32_t y, uint32_t* pitch) {
+    if (id >= g_ntexs || !g_texs[id].used || !g_texs[id].tex.surface.image) return NULL;
+    Tex* t = &g_texs[id];
+    prepare_update(t);
+    *pitch = t->tex.surface.pitch * 4;
+    return (uint8_t*)t->tex.surface.image + (size_t)y * *pitch + x * 4;
+}
+
+void gfx_tex_update_end(uint32_t id, uint32_t y, uint32_t h) {
+    pixels_written(&g_texs[id], y, h);
 }
 
 void gfx_tex_free(uint32_t id) {
@@ -545,6 +638,7 @@ static void screen_to_linear(void) {
 }
 
 static void read_pixels(Tex* t, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* out) {
+    settle_target(t);
     gpu_sync();
     uint8_t* img = (uint8_t*)t->tex.surface.image;
     if (!img || g_gpu_lost) {
@@ -636,7 +730,7 @@ static uint32_t g_c3d_nprogs;
 static FetchEntry g_fetch[FETCH_CACHE];
 static uint32_t g_frame_no, g_fetch_clock;
 static int g_glsl_ready;
-static GX2Sampler g_c3d_samplers[8]; // [wrap 0..3][linear]
+static GX2Sampler g_c3d_samplers[24]; // [mip none/nearest/linear][wrap 0..3][linear]
 
 uint32_t gfx_c3d_flags(void) { return 2; } // no Y flip (GX2 clip +1 is the top row), plain uniforms
 
@@ -885,12 +979,14 @@ uint32_t gfx_c3d_program(const char* vs, const char* fs) {
         g_glsl_ready = 1;
         compile_thread_ok = start_compile_thread();
         if (!compile_thread_ok) plat_log(0, "Stage3D: couldn't start the shader compile thread");
-        for (int i = 0; i < 8; i++) {
-            int wrap = i >> 1;
+        for (int i = 0; i < 24; i++) {
+            int wrap = (i & 7) >> 1;
             GX2TexClampMode u = (wrap == 1 || wrap == 3) ? GX2_TEX_CLAMP_MODE_WRAP : GX2_TEX_CLAMP_MODE_CLAMP;
             GX2TexClampMode v = (wrap == 1 || wrap == 2) ? GX2_TEX_CLAMP_MODE_WRAP : GX2_TEX_CLAMP_MODE_CLAMP;
             GX2InitSampler(&g_c3d_samplers[i], u, (i & 1) ? GX2_TEX_XY_FILTER_MODE_LINEAR : GX2_TEX_XY_FILTER_MODE_POINT);
             GX2InitSamplerClamping(&g_c3d_samplers[i], u, v, GX2_TEX_CLAMP_MODE_CLAMP);
+            GX2InitSamplerZMFilter(&g_c3d_samplers[i], GX2_TEX_Z_FILTER_MODE_NONE, (GX2TexMipFilterMode)(i >> 3));
+            GX2InitSamplerLOD(&g_c3d_samplers[i], 0.0f, 14.0f, 0.0f);
         }
     }
     if (!compile_thread_ok) return 0;
@@ -994,7 +1090,9 @@ static GX2FetchShader* fetch_shader(uint32_t prog_id, const C3dProg* pr, const u
     }
     memset(e, 0, sizeof(*e));
     uint32_t size = GX2CalcFetchShaderSizeEx(count, GX2_FETCH_SHADER_TESSELLATION_NONE, GX2_TESSELLATION_MODE_DISCRETE);
+    g_heap_next = 1; // (stays for the whole session)
     e->mem = gpu_alloc(size, 256); // shader program alignment
+    g_heap_next = 0;
     if (!e->mem) return NULL;
     GX2InitFetchShaderEx(&e->fs, (uint8_t*)e->mem, count, streams, GX2_FETCH_SHADER_TESSELLATION_NONE, GX2_TESSELLATION_MODE_DISCRETE);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, e->mem, size);
@@ -1071,7 +1169,7 @@ void gfx_c3d_draw(const uint32_t* w, uint32_t n) {
         // (tx[1] marks a cube texture: a 2D strip of 6 faces that the GLSL samples itself, see context3d.rs)
         if (pr->samp_loc[i] < 0 || !tx[0] || tx[0] >= g_ntexs || !g_texs[tx[0]].used) continue;
         GX2SetPixelTexture(&g_texs[tx[0]].tex, (uint32_t)pr->samp_loc[i]);
-        GX2SetPixelSampler(&g_c3d_samplers[(tx[2] & 3) << 1 | (tx[3] & 1)], (uint32_t)pr->samp_loc[i]);
+        GX2SetPixelSampler(&g_c3d_samplers[(tx[3] >> 1 & 3) % 3 * 8 + ((tx[2] & 3) << 1 | (tx[3] & 1))], (uint32_t)pr->samp_loc[i]);
     }
 
     GX2SetColorControl(GX2_LOGIC_OP_COPY, 0xff, FALSE, TRUE);
@@ -1125,6 +1223,9 @@ void gfx_reset(void) {
     for (uint32_t i = 0; i < g_ntexs; i++) gfx_tex_free(i);
     for (uint32_t i = 0; i < g_c3d_nbufs; i++) gfx_c3d_buf_free(i);
     for (uint32_t i = 0; i < g_c3d_nprogs; i++) gfx_c3d_program_free(i);
+    // Now, not a frame later: what's allocated next would otherwise land above all this and pin the shared block high
+    // (Learn To Fly 3 left it at 360 MB for every game after it, and Happy Wheels then ran out).
+    release_pending_now();
 }
 
 void gfx_gx2_read_screen_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* rgba) {
@@ -1206,7 +1307,7 @@ static void set_blend(uint32_t mode) {
     case 6: eq = GX2_BLEND_COMBINE_MODE_MIN; dst = GX2_BLEND_MODE_ONE; break;        // darken
     case 8: dst = GX2_BLEND_MODE_ONE; break;                                         // add
     case 9: eq = GX2_BLEND_COMBINE_MODE_REV_SUB; dst = GX2_BLEND_MODE_ONE; break;    // subtract
-    case 10: src = GX2_BLEND_MODE_INV_DST_COLOR; dst = GX2_BLEND_MODE_ZERO; break;   // invert
+    case 10: src = GX2_BLEND_MODE_INV_DST_COLOR; dst = GX2_BLEND_MODE_INV_SRC_COLOR; break; // invert (what's see-through stays)
     case 11: src = GX2_BLEND_MODE_ZERO; dst = adst = GX2_BLEND_MODE_SRC_ALPHA; asrc = src; break; // alpha
     case 12: src = GX2_BLEND_MODE_ZERO; dst = GX2_BLEND_MODE_INV_SRC_ALPHA; asrc = src; break; // erase
     case 255:                                                                        // opaque copy (Stage3D)

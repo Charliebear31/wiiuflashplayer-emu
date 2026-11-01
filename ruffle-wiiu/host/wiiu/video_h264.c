@@ -3,8 +3,8 @@
 #include <coreinit/cache.h>
 #include <coreinit/thread.h>
 #include <coreinit/time.h>
-#include <coreinit/memdefaultheap.h>
 #include <h264/decode.h>
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,7 +80,7 @@ static H264Error run_decode(Decoder* d, uint32_t len) {
 }
 
 static void on_output(H264DecodeOutput* output) {
-    Decoder* d = *(Decoder**)output->userMemory;
+    Decoder* d = (Decoder*)output->userMemory; // (SetParam took a pointer to this, but the value itself comes back)
     if (output->frameCount <= 0 || !d) return;
     H264DecodeResult* r = output->decodeResults[output->frameCount - 1];
     d->out = (uint8_t*)r->framebuffer;
@@ -98,11 +98,29 @@ static void close_decoder(Decoder* d) {
     H264DECFlush(d->mem);
     H264DECEnd(d->mem);
     H264DECClose(d->mem);
-    MEMFreeToDefaultHeap(d->mem);
-    MEMFreeToDefaultHeap(d->fb);
-    if (d->stream) MEMFreeToDefaultHeap(d->stream);
+    free(d->mem);
+    free(d->fb);
+    free(d->stream);
     free(d->rgba);
     memset(d, 0, sizeof(*d));
+}
+
+// The decoder's own memory has to pass the system's check, so a block that fails is held while the next one is taken.
+static void* alloc_decoder_memory(uint32_t size) {
+    void* refused[4];
+    int nrefused = 0;
+    void* p = memalign(0x100, size);
+    while (p && H264DECCheckMemSegmentation(p, size) != H264_ERROR_OK) {
+        if (nrefused == 4) {
+            free(p);
+            p = NULL;
+            break;
+        }
+        refused[nrefused++] = p;
+        p = memalign(0x100, size);
+    }
+    while (nrefused) free(refused[--nrefused]);
+    return p;
 }
 
 void gfx_h264_close(uint32_t id) {
@@ -115,6 +133,7 @@ void gfx_h264_reset(void) {
 
 uint32_t gfx_h264_open(uint32_t w, uint32_t h) {
     uint32_t id = 0;
+    if (g_decoder_stuck) return 0;
     for (uint32_t i = 0; i < MAX_DECODERS; i++)
         if (!g_dec[i].used) {
             id = i + 1;
@@ -123,7 +142,9 @@ uint32_t gfx_h264_open(uint32_t w, uint32_t h) {
     if (!id) return 0;
     Decoder* d = &g_dec[id - 1];
     uint32_t aw = (w + 15) & ~15u, ah = (h + 15) & ~15u, size = 0;
-    H264Error e = H264DECMemoryRequirement(100, 51, (int32_t)aw, (int32_t)ah, &size);
+    // (Level 4.2 covers 1080p. The memory comes from malloc: the system heap has little left, and the console
+    // ran out there on a 256x192 video.)
+    H264Error e = H264DECMemoryRequirement(100, 42, (int32_t)aw, (int32_t)ah, &size);
     char m[120];
     if (e != H264_ERROR_OK || !size) {
         snprintf(m, sizeof(m), "H.264: no decoder for %ux%u (error %x)", (unsigned)w, (unsigned)h, (unsigned)e);
@@ -132,17 +153,22 @@ uint32_t gfx_h264_open(uint32_t w, uint32_t h) {
     }
     uint32_t pitch = (aw + 255) & ~255u;
     d->fb_size = pitch * ah * 3 / 2;
-    d->mem = MEMAllocFromDefaultHeapEx(size, 0x100);
-    d->fb = (uint8_t*)MEMAllocFromDefaultHeapEx(d->fb_size, 0x100);
+    d->mem = alloc_decoder_memory(size);
+    d->fb = (uint8_t*)memalign(0x100, d->fb_size);
     d->rgba = (uint8_t*)malloc((size_t)w * h * 4);
     if (!d->mem || !d->fb || !d->rgba) {
-        if (d->mem) MEMFreeToDefaultHeap(d->mem);
-        if (d->fb) MEMFreeToDefaultHeap(d->fb);
+        snprintf(m, sizeof(m), "H.264: out of memory for %ux%u (decoder %u KB%s, picture %u KB%s)", (unsigned)w, (unsigned)h,
+                 (unsigned)(size >> 10), d->mem ? "" : " failed", (unsigned)(d->fb_size >> 10), d->fb ? "" : " failed");
+        plat_log(1, m);
+        free(d->mem);
+        free(d->fb);
         free(d->rgba);
         memset(d, 0, sizeof(*d));
-        plat_log(1, "H.264: out of memory");
         return 0;
     }
+    snprintf(m, sizeof(m), "H.264: decoder for %ux%u, %u KB", (unsigned)w, (unsigned)h, (unsigned)(size >> 10));
+    plat_log(2, m);
+    OSSleepTicks(OSMillisecondsToTicks(100)); // lets the log thread save that, in case the decoder never comes back
     d->w = w;
     d->h = h;
     static Decoder* user[MAX_DECODERS];
@@ -172,9 +198,9 @@ int gfx_h264_decode(uint32_t id, uint32_t tex, const uint8_t* data, uint32_t len
     if (!id || id > MAX_DECODERS || !g_dec[id - 1].used || g_decoder_stuck) return 0;
     Decoder* d = &g_dec[id - 1];
     if (len + 16 > d->stream_size) {
-        if (d->stream) MEMFreeToDefaultHeap(d->stream);
+        free(d->stream);
         d->stream_size = (len + 16 + 65535) & ~65535u;
-        d->stream = (uint8_t*)MEMAllocFromDefaultHeapEx(d->stream_size, 0x100);
+        d->stream = (uint8_t*)memalign(0x100, d->stream_size);
         if (!d->stream) {
             d->stream_size = 0;
             return 0;
@@ -194,6 +220,12 @@ int gfx_h264_decode(uint32_t id, uint32_t tex, const uint8_t* data, uint32_t len
         }
     }
     if (!d->out) return 0;
+    static int first_picture;
+    if (!first_picture++) {
+        char m[80];
+        snprintf(m, sizeof(m), "H.264: first picture decoded, %dx%d", d->out_w, d->out_h);
+        plat_log(2, m);
+    }
     DCInvalidateRange(d->fb, d->fb_size);
     int w = d->out_w < (int)d->w ? d->out_w : (int)d->w;
     int h = d->out_h < (int)d->h ? d->out_h : (int)d->h;

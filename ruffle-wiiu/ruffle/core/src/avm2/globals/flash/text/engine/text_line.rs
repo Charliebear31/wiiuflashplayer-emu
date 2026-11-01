@@ -3,7 +3,7 @@ use crate::avm2::error::{Error, make_error_2008};
 use crate::avm2::function::FunctionArgs;
 use crate::avm2::parameters::ParametersExt;
 use crate::avm2::value::Value;
-use crate::display_object::TDisplayObject;
+use crate::display_object::{TDisplayObject, TextLine};
 use crate::fte::TextLineValidity;
 use ruffle_macros::istr;
 
@@ -236,4 +236,48 @@ pub fn get_text_height<'gc>(
 
     let measured_text = text_line.measure_text(activation.context);
     Ok(measured_text.1.to_pixels().into())
+}
+
+fn line_of<'gc>(this: Value<'gc>) -> TextLine<'gc> {
+    this.as_object()
+        .unwrap()
+        .as_display_object()
+        .unwrap()
+        .as_text_line()
+        .unwrap()
+}
+
+pub fn get_has_graphic_element<'gc>(
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    _args: FunctionArgs<'_, 'gc>,
+) -> Result<Value<'gc>, Error<'gc>> {
+    Ok(line_of(this).has_graphics().into())
+}
+
+pub fn char_left<'gc>(
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
+) -> Result<Value<'gc>, Error<'gc>> {
+    let edges = line_of(this).char_x(args.get_i32(0) as usize);
+    Ok(edges.map_or(0.0, |e| e.0).into())
+}
+
+pub fn char_right<'gc>(
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
+) -> Result<Value<'gc>, Error<'gc>> {
+    let edges = line_of(this).char_x(args.get_i32(0) as usize);
+    Ok(edges.map_or(0.0, |e| e.1).into())
+}
+
+pub fn graphic_at<'gc>(
+    _activation: &mut Activation<'_, 'gc>,
+    this: Value<'gc>,
+    args: FunctionArgs<'_, 'gc>,
+) -> Result<Value<'gc>, Error<'gc>> {
+    let graphic = line_of(this).graphic_at(args.get_i32(0) as usize);
+    Ok(graphic.and_then(|g| g.object2()).map_or(Value::Null, Value::from))
 }

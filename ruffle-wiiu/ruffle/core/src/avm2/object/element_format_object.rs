@@ -268,6 +268,8 @@ impl<'gc> ElementFormatObject<'gc> {
             font: Some(font),
             bold: Some(bold),
             italic: Some(italic),
+            letter_spacing: Some(self.tracking_left() + self.tracking_right()),
+            kerning: Some(self.kerning() != KerningValue::Off),
             ..TextFormat::default()
         }
     }

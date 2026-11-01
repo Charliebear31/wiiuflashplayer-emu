@@ -24,9 +24,9 @@ Other known limits:
 
 - Games can't go online: there are no network connections or sockets, so online features and games that download their content won't work.
 - Camera and microphone aren't supported.
-- Some less common parts of Flash are still missing or incomplete, such as some text engine features, mipmaps and DXT1 Stage3D textures.
+- Some less common parts of Flash are still missing or incomplete, such as right-to-left and vertical text, cube texture mipmaps, and Stage3D textures that only carry PVRTC or ETC data.
 - Some Pixel Bender shaders don't draw correctly yet.
-- H.264 video has not been confirmed working. Cemu freezes when decoding it, so it can only be tested on a real console.
+- Only one H.264 video can decode smoothly at a time, because each decoder needs about 40 MB.
 
 ## Features
 
@@ -34,9 +34,11 @@ Other known limits:
 - ActionScript 1, 2 and 3 games
 - Vector shapes, bitmaps, gradients, masks and all the common blend modes
 - Filters: blur, glow, drop shadow, bevel, gradient glow and bevel, colour matrix, convolution and displacement map, with the most common ones running on the GPU
-- Stage3D (3D games), with shaders compiled on the console, including cube textures and ATF textures
+- Stage3D (3D games), with shaders compiled on the console, including cube textures, mipmaps and ATF textures
+- Flash text engine: line wrapping, mixed formats, baselines, justification and inline graphics
+- Works without the Armor Games online service: games that wait for its file still start, with scoreboards turned off
 - Pixel Bender shaders (partial)
-- Video: H.263, VP6 and Screen Video, plus H.264 (untested, see above)
+- Video: H.263, VP6 and Screen Video, plus H.264 through the console's own decoder
 - Game saves: each game's save data is kept on the SD card
 - Device fonts for games that use system text
 - Games can't open websites or links, and sitelocked games can be given the address they expect
@@ -71,7 +73,7 @@ Other known limits:
 3. Put your games in `sd:/wiiu/apps/flashplayeremu/swf/`.
 4. Start **Flashplayer Emu** from the Homebrew Launcher or the Aroma menu.
 
-Games that come as a folder of files can be kept in their own folder, with all their files next to the `.swf`.
+Games that come as a folder of files can be kept in their own folder, with all their files next to the `.swf`. A game saved together with its website also works: copy the whole folder into `swf/`, keeping the web page in it, and the game is found through that page.
 
 For a sitelocked game, add a text file named `<game>.swf.url` next to it, containing the web address the game expects.
 

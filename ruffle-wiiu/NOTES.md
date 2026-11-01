@@ -255,12 +255,39 @@ Route: Ruffle (Rust) -> `wasm32-wasip1` -> **wasm2c** -> C -> devkitPPC/wut. Sam
   sdcard/swftest and shoot it in Cemu, or use build-pc\rwpc.exe. Cemu doesn't show CPU writes to a texture that was a
   render target (CPU filters on cached objects look unfiltered there): check those on the PC host.
 - Pixel Bender: wiiu/src/pixel_bender.rs (naga-pixelbender -> GLSL -> CafeGLSL), gfx_pb_run. flatten_shader removes
-  all `if`s and the sampler helper because CafeGLSL hung in Cemu on them. Matches: dithering, luma lighten blend. Not
-  matching in Cemu: BlurredFocus (green tint, cause unknown), glassDisplace's applyFilter copy (stays blue),
-  shader_as_mask's first quadrant. Float targets for ShaderJob output are unverified.
-- H.264: wiiu/src/video.rs + host/wiiu/video_h264.c, using h264.rpl on a worker thread with a 2 s limit. Cemu 2.6
-  freezes whole inside H264DECExecute, so it has never decoded a frame: test on a console (visual/video/h264).
-- Not done: Stage3D Compressed (DXT1) format, mipmaps.
+  all `if`s and the sampler helper because CafeGLSL hung in Cemu on them, and writes cross() out (it gave green from zero
+  inputs). The PC host doesn't run these (gfx_pb_run returns 0): test in Cemu. Look right there: tintype, smudge, twirl,
+  dithering, images, glassDisplace and its applyFilter. Not matching: BlurredFocus (halo still green; a vector pow() written
+  out changed nothing), shader_as_mask's first quadrant. Float targets for ShaderJob output are unverified.
+- Anything drawn with render_bitmap must stay alive until the flush: the last handle's drop frees the picture and the host
+  skips the draw silently (put_pixels and apply_shader_filter both did this).
+- Text engine (2026-10-31): text_block.rs breaks lines itself (width, breakOpportunity, fitSomething) and keeps every span's format; a TextLine's origin is its baseline. 22 of 28 tests match real Flash; compare by trace with output.txt. Not done: bidi, vertical text and per-span rotation, ligatures, real getFontMetrics, mirror regions, tab alignment other than start; children of a TextLine.
+- Stage3D mipmaps: gfx_tex_mip adds a linear mip chain on first upload; not for cube textures. ATF: atf_jpegxr.rs decodes every mip; the lossy record layout is a guess (no public description, no test file) and only DXT data is used.
+- Test scripts: `realtime` must come after `movie` (before it, the menu loop consumes it). Without it, audio takes the fixed-step path, which never updates the peak meter and sounds choppy.
+- Digger (Diggy, Box2D, GroundMap read with getPixel, holes drawn with BlendMode.ERASE): falls through the ground on the console with no tunnel drawn; in Cemu it digs normally. Possibly the same console-only problem as Moto's black blocks (unproven). swf/Readback Test logs "RB" lines with wrong pixels; all are 0 in Cemu.
+- Happy Wheels' black level: its FPS text is BlendMode.INVERT, which went through a full-size layer, and the invert blend zeroed everything see-through. Fixed in set_blend (both hosts). Coloured or black sources still aren't exact: Flash inverts by coverage alone. main_wiiu.c also frees unused memory at once when the block is within 112 MB of full (rw_collect); that path hasn't been seen to run yet.
+- content/stubs/AGI.swf stands in for Armor Games' online AGI.swf (navigator.rs), which games wait for with no error handler (Johnny Upgrade). Readback Test on a console: 0 wrong, so Digger's fall and Moto's blocks aren't pixel readback.
+- Saved websites as game folders (Angry Birds Coke / McDonald's): a folder with no SWF at its top is listed under the
+  folder's name, using the SWF its page (.html/.jsp/.php/...) embeds, else the biggest SWF below. start_url passes that page
+  as a third line to rw_start; site.rs reads FlashVars from it. navigator.rs on_site finds "/x", "http://site/x" and
+  page-relative links inside swf/<folder>. Those Angry Birds are slow: ~70% in the AS3 interpreter (Cemu, about 240 ms a frame).
+- H.264: wiiu/src/video.rs + host/wiiu/video_h264.c, using h264.rpl on a worker thread with a 2 s limit. It decodes in
+  Cemu and matches visual/video/h264 (the earlier "Cemu freezes in H264DECExecute" was the callback bug below).
+  Its memory comes from malloc at level 4.2 (35 MB per stream at 256x160): the system heap gave "out of memory" on the
+  console at level 5.1. The 100 ms pause after opening saves the log line in case the decoder never comes back.
+  The output callback's userMemory is the value itself, not a pointer to it. The engine never ends a stream, so video.rs
+  keeps 2 decoders at most, closing the least recently used. Confirmed on a console (2026-10-31): 39 MB per decoder, and
+  a second one doesn't fit in the heap, so in practice one is live and the "out of memory" warning before a reopen is
+  normal. visual/video/h264 slows down when left running because its timeline adds a new Video every 6 s: not a leak. A single framebuffer is passed to Execute: if a video with
+  B-frames shows out of order on a console, give it a ring of them.
+- Stage3D DXT1: raw ATF only (RawCompressed, dxt1_to_rgba); no test file exists, so it's untested. Not done: LZMA/JPEG-XR
+  ATF "Compressed" and lossy formats, mipmaps (level 0 is always sampled).
+- Console logs (2026-10-31): Moto X3M 4-5 fps with black blocks in the beach. It draws pictures on the GPU, reads them back and
+  updates 1.3 MB of pictures a frame. settle_target flushes the colour cache before the CPU touches a drawn picture: a best
+  guess from the block shape, Cemu never showed it, confirm on a console. Host fills (host_fill_words) and direct uploads
+  (gfx_tex_update_begin) replace a wasm loop and a double copy. gfx_reset now frees at once: LTF3 left the pool top at 360 MB.
+- Watchdog stacks stop in system calls such as the log's mutex: they don't show where time goes. Use the alarm "slow spots",
+  and look addresses up with nm (addr2line gave misleading names). EBF5 at 520 + 225 MB is the real limit, not a leak.
 - Stuck games: core/src/timer.rs update_timers' 64-bit `tick_time < cur_time` came out false in Cemu, so overdue timers
   never fired. Now tested by the difference's top bit. That unstuck Cat Mario's level, Duck Life 2, Papa's, Bloons and
   Learn To Fly 2 at once. Suspect other u64 comparisons if something "can't" happen. Test in levels, not just menus.

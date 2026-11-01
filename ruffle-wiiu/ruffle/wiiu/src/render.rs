@@ -348,7 +348,8 @@ impl HostRenderer {
         let mut put = Transform::default();
         put.matrix.tx = Twips::from_pixels(dest_point.0 as f64);
         put.matrix.ty = Twips::from_pixels(dest_point.1 as f64);
-        self.render_bitmap(result, put, false, PixelSnapping::Never, PixelRegion::for_whole_size(sw, sh));
+        // Kept until after the flush, as in put_pixels: this draw used to find the picture freed.
+        self.render_bitmap(result.clone(), put, false, PixelSnapping::Never, PixelRegion::for_whole_size(sw, sh));
         self.flush(dst_id);
         Some(Box::new(OffscreenSync { texture: dst_id, region }))
     }
@@ -856,8 +857,8 @@ impl RenderBackend for HostRenderer {
             PixelBenderTarget::Bitmap(bitmap) => {
                 let t = as_texture(bitmap);
                 let (id, w, h) = (t.id, t.width, t.height);
-                self.begin(Some(Color { r: 0, g: 0, b: 0, a: 0 }));
-                self.flush(id);
+                // No clear first: the shader's quad replaces every pixel, and an input may be this same picture
+                // (clearing it left Tintype and Smudge reading nothing).
                 crate::pixel_bender::run(&handle, arguments, id, false);
                 Ok(PixelBenderOutput::Bitmap(Box::new(OffscreenSync {
                     texture: id,

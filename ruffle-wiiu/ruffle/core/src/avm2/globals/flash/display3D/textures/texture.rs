@@ -19,22 +19,12 @@ pub fn do_copy<'gc>(
     side: u32,
     mip_level: u32,
 ) -> Result<(), Error<'gc>> {
-    if mip_level != 0 {
-        avm2_stub_method!(
-            activation,
-            "flash.display3D.textures.Texture",
-            "uploadFromByteArray",
-            "with miplevel != 0"
-        );
-        return Ok(());
-    }
-
     // FIXME - see if we can avoid this intermediate BitmapData, and copy
     // directly from a buffer to the target GPU texture
     let bitmap_data = match texture.original_format() {
         Context3DTextureFormat::Bgra => {
-            let width = texture.handle().width();
-            let height = texture.handle().height();
+            let width = (texture.handle().width() >> mip_level).max(1);
+            let height = (texture.handle().height() >> mip_level).max(1);
 
             let bytearray = data.as_bytearray().unwrap();
 
@@ -64,6 +54,7 @@ pub fn do_copy<'gc>(
         &bitmap_data.sync(activation.context.renderer).borrow(),
         texture.handle(),
         side,
+        mip_level,
     );
     Ok(())
 }
@@ -81,7 +72,9 @@ pub fn upload_compressed_texture_from_byte_array_internal<'gc>(
 
     if !matches!(
         texture.original_format(),
-        Context3DTextureFormat::Bgra | Context3DTextureFormat::CompressedAlpha
+        Context3DTextureFormat::Bgra
+            | Context3DTextureFormat::Compressed
+            | Context3DTextureFormat::CompressedAlpha
     ) {
         avm2_stub_method!(
             activation,
@@ -125,20 +118,12 @@ pub fn upload_from_bitmap_data<'gc>(
 
         if let Some(source) = source_obj.as_bitmap_data() {
             let mip_level = args.get_u32(1);
-            if mip_level == 0 {
-                texture.context3d().copy_bitmapdata_to_texture(
-                    &source.sync(activation.context.renderer).borrow(),
-                    texture.handle(),
-                    0,
-                );
-            } else {
-                avm2_stub_method!(
-                    activation,
-                    "flash.display3D.textures.Texture",
-                    "uploadFromBitmapData",
-                    "with miplevel != 0"
-                );
-            }
+            texture.context3d().copy_bitmapdata_to_texture(
+                &source.sync(activation.context.renderer).borrow(),
+                texture.handle(),
+                0,
+                mip_level,
+            );
         } else {
             unreachable!("Argument is BitmapData-typed");
         }

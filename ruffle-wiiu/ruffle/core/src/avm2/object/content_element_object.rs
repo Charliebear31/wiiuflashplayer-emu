@@ -2,7 +2,8 @@ use crate::avm2::Error;
 use crate::avm2::activation::Activation;
 use crate::avm2::object::element_format_object::ElementFormatObject;
 use crate::avm2::object::script_object::ScriptObjectData;
-use crate::avm2::object::{ClassObject, Object, TObject};
+use crate::avm2::object::{ClassObject, Object, TObject, TextBlockObject};
+use crate::display_object::DisplayObject;
 use crate::fte::TextRotationValue;
 use crate::string::AvmString;
 use core::fmt;
@@ -25,6 +26,8 @@ pub fn content_element_allocator<'gc>(
             text_rotation: Cell::new(TextRotationValue::Rotate0),
             event_mirror: Lock::new(None),
             element_data: RefLock::new(ElementData::Invalid),
+            owner_block: Lock::new(None),
+            group: Lock::new(None),
         },
     ))
     .into())
@@ -68,6 +71,12 @@ pub struct ContentElementObjectData<'gc> {
     /// `content` of a `TextBlock` to an instance of such a class throws an
     /// error.
     element_data: RefLock<ElementData<'gc>>,
+
+    /// The block whose `content` this is.
+    owner_block: Lock<Option<TextBlockObject<'gc>>>,
+
+    /// The `GroupElement` holding this one.
+    group: Lock<Option<ContentElementObject<'gc>>>,
 }
 
 #[derive(Collect)]
@@ -87,8 +96,12 @@ pub enum ElementData<'gc> {
         elements: Vec<ContentElementObject<'gc>>,
     },
 
-    /// Such as for the `GraphicElement` class. TODO
-    Graphic,
+    /// Such as for the `GraphicElement` class.
+    Graphic {
+        graphic: Option<DisplayObject<'gc>>,
+        width: f64,
+        height: f64,
+    },
 
     /// Such as for a user-defined class extending `ContentElement`.
     Invalid,
@@ -127,6 +140,56 @@ impl<'gc> ContentElementObject<'gc> {
             event_mirror
         )
         .set(value);
+    }
+
+    pub fn set_owner_block(self, value: Option<TextBlockObject<'gc>>, mc: &Mutation<'gc>) {
+        unlock!(Gc::write(mc, self.0), ContentElementObjectData, owner_block).set(value);
+    }
+
+    pub fn group(self) -> Option<ContentElementObject<'gc>> {
+        self.0.group.get()
+    }
+
+    pub fn set_group(self, value: Option<ContentElementObject<'gc>>, mc: &Mutation<'gc>) {
+        unlock!(Gc::write(mc, self.0), ContentElementObjectData, group).set(value);
+    }
+
+    /// The block this element is in, directly or through its groups.
+    pub fn text_block(self) -> Option<TextBlockObject<'gc>> {
+        match self.group() {
+            Some(group) => group.text_block(),
+            None => self.0.owner_block.get(),
+        }
+    }
+
+    /// This element's text as a block sees it: a graphic is U+FDEF.
+    pub fn raw_len(self) -> usize {
+        match &*self.element_data() {
+            ElementData::Text { text } => text.map_or(0, |t| t.len()),
+            ElementData::Group { elements } => elements.iter().map(|e| e.raw_len()).sum(),
+            ElementData::Graphic { .. } => 1,
+            ElementData::Invalid => 0,
+        }
+    }
+
+    /// Where this element starts in its block's text, if it's in one.
+    pub fn block_begin_index(self) -> Option<usize> {
+        let Some(group) = self.group() else {
+            return self.0.owner_block.get().map(|_| 0);
+        };
+        let begin = group.block_begin_index()?;
+        let data = group.element_data();
+        let ElementData::Group { elements } = &*data else {
+            return None;
+        };
+        let mut before = 0;
+        for element in elements {
+            if Object::ptr_eq(*element, self) {
+                return Some(begin + before);
+            }
+            before += element.raw_len();
+        }
+        None
     }
 
     pub fn element_data(&self) -> Ref<'_, ElementData<'gc>> {
@@ -171,7 +234,7 @@ impl<'gc> ContentElementObject<'gc> {
 
                 result
             }
-            ElementData::Graphic => Some(istr!("")),
+            ElementData::Graphic { .. } => Some(istr!("")),
             ElementData::Invalid => None,
         }
     }

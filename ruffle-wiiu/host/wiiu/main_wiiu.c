@@ -548,8 +548,124 @@ static int has_ext(const char* name, const char* ext) {
     return n > e && !strcasecmp(name + n - e, ext);
 }
 
+static int entry_is_dir(const struct dirent* e, const char* full) {
+    if (e->d_type != DT_UNKNOWN) return e->d_type == DT_DIR;
+    struct stat st;
+    return stat(full, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int file_exists(const char* wasi_path) {
+    char full[500];
+    struct stat st;
+    snprintf(full, sizeof(full), SD "%s", wasi_path);
+    return stat(full, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static int is_web_page(const char* name) {
+    static const char* const exts[] = { ".html", ".htm", ".xhtml", ".jsp", ".php", ".asp", ".aspx" };
+    for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); i++)
+        if (has_ext(name, exts[i])) return 1;
+    return 0;
+}
+
+// The Flash installer that web pages name next to the game.
+static int is_flash_installer(const char* name) {
+    return !strncasecmp(name, "playerProductInstall", 20) || !strncasecmp(name, "expressInstall", 14);
+}
+
+static const char* base_name(const char* path) {
+    const char* slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+// The SWF a saved web page embeds: the first quoted "....swf" on the site that isn't the installer. A page's links
+// start at its own folder or, with a leading slash, at the top of the site (`root`). With `want`, only an SWF of that
+// name counts. `out` gets the SWF's WASI path.
+static int page_names_swf(const char* page, const char* page_dir, const char* root, const char* want, char* out, size_t n) {
+    enum { MAX_PAGE = 512 * 1024 };
+    char full[500];
+    snprintf(full, sizeof(full), SD "%s", page);
+    FILE* f = fopen(full, "rb");
+    if (!f) return 0;
+    char* text = (char*)malloc(MAX_PAGE);
+    size_t len = text ? fread(text, 1, MAX_PAGE, f) : 0;
+    fclose(f);
+    int found = 0;
+    for (size_t i = 0; i + 4 <= len && !found; i++) {
+        if (strncasecmp(text + i, ".swf", 4)) continue;
+        size_t start = i;
+        while (start > 0 && text[start - 1] != '"' && text[start - 1] != '\'' && text[start - 1] != '\n' && i - start < 200) start--;
+        if (start == 0 || text[start - 1] == '\n' || i - start >= 200) continue;
+        char ref[220];
+        snprintf(ref, sizeof(ref), "%.*s.swf", (int)(i - start), text + start);
+        if (strstr(ref, "://") || is_flash_installer(base_name(ref))) continue;
+        if (want && strcasecmp(base_name(ref), want)) continue;
+        snprintf(out, n, "%s/%s", ref[0] == '/' ? root : page_dir, ref[0] == '/' ? ref + 1 : ref);
+        found = file_exists(out);
+        if (!found) {
+            snprintf(out, n, "%s/%s", root, ref[0] == '/' ? ref + 1 : ref);
+            found = file_exists(out);
+        }
+    }
+    free(text);
+    return found;
+}
+
+// Looks through a site's pages, its top folder first. `page_out` (optional) gets the page that named the SWF.
+static int find_site_page(const char* dir, const char* root, const char* want, int depth, char* swf_out, size_t n, char* page_out, size_t page_n) {
+    char full[500];
+    snprintf(full, sizeof(full), SD "%s", dir);
+    DIR* d = opendir(full);
+    if (!d) return 0;
+    struct dirent* e;
+    int found = 0;
+    while (!found && (e = readdir(d))) {
+        if (e->d_name[0] == '.' || !is_web_page(e->d_name)) continue;
+        char page[500];
+        snprintf(page, sizeof(page), "%s/%s", dir, e->d_name);
+        found = page_names_swf(page, dir, root, want, swf_out, n);
+        if (found && page_out) snprintf(page_out, page_n, "%s", page);
+    }
+    if (!found && depth > 0) {
+        rewinddir(d);
+        while (!found && (e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            char sub[500];
+            snprintf(sub, sizeof(sub), "%s/%s", dir, e->d_name);
+            snprintf(full, sizeof(full), SD "%s", sub);
+            if (entry_is_dir(e, full)) found = find_site_page(sub, root, want, depth - 1, swf_out, n, page_out, page_n);
+        }
+    }
+    closedir(d);
+    return found;
+}
+
+// The biggest SWF anywhere below dir, for a site with no page that names one.
+static void biggest_swf_below(const char* dir, int depth, char* best, size_t n, long* best_size) {
+    char full[500];
+    snprintf(full, sizeof(full), SD "%s", dir);
+    DIR* d = opendir(full);
+    if (!d) return;
+    struct dirent* e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char sub[500];
+        snprintf(sub, sizeof(sub), "%s/%s", dir, e->d_name);
+        snprintf(full, sizeof(full), SD "%s", sub);
+        struct stat st;
+        if (entry_is_dir(e, full)) {
+            if (depth > 0) biggest_swf_below(sub, depth - 1, best, n, best_size);
+        } else if (has_ext(e->d_name, ".swf") && !is_flash_installer(e->d_name) && stat(full, &st) == 0 && (long)st.st_size > *best_size) {
+            *best_size = (long)st.st_size;
+            snprintf(best, n, "%s", sub);
+        }
+    }
+    closedir(d);
+}
+
 // A game folder (swf/<folder>/) is one game in the list, whatever else is in it (XML, sounds, extra SWFs
-// the game loads): the SWF named like the folder, else its only SWF, else its biggest one.
+// the game loads): the SWF named like the folder, else its only SWF, else its biggest one. A folder with no SWF
+// at its top is a saved website: the SWF its page embeds, else the biggest one below it.
 static void scan_game_folder(const char* wasi_dir, const char* folder_name) {
     char dir[300];
     snprintf(dir, sizeof(dir), SD "%s", wasi_dir);
@@ -575,7 +691,19 @@ static void scan_game_folder(const char* wasi_dir, const char* folder_name) {
         }
     }
     closedir(d);
-    if (!best[0] || g_ngames >= MAX_GAMES) return;
+    if (g_ngames >= MAX_GAMES) return;
+    if (!best[0]) {
+        char site_swf[256] = "";
+        long size = -1;
+        if (!find_site_page(wasi_dir, wasi_dir, NULL, 2, site_swf, sizeof(site_swf), NULL, 0))
+            biggest_swf_below(wasi_dir, 3, site_swf, sizeof(site_swf), &size);
+        if (!site_swf[0]) return;
+        UiGame* g = &g_games[g_ngames++];
+        snprintf(g->path, sizeof(g->path), "%s", site_swf);
+        ui_game_info(g, SD);
+        snprintf(g->title, sizeof(g->title), "%s", folder_name);
+        return;
+    }
     UiGame* g = &g_games[g_ngames++];
     snprintf(g->path, sizeof(g->path), "%s/%s", wasi_dir, best);
     ui_game_info(g, SD);
@@ -742,9 +870,18 @@ static void spoof_for(const char* game, char* out, size_t n) {
 }
 
 static void start_url(const char* game, uint32_t w, uint32_t h) {
-    char spoof[256], url[700];
+    char spoof[256], url[1000], page[300] = "";
     spoof_for(game, spoof, sizeof(spoof));
-    snprintf(url, sizeof(url), "file://%s%s%s", game, spoof[0] ? "\n" : "", spoof);
+    // A game in its own folder: the web page that embeds it holds its settings (FlashVars).
+    const char* in_swf = strstr(game, "/swf/");
+    const char* folder_end = in_swf ? strchr(in_swf + 5, '/') : NULL;
+    if (folder_end) {
+        char root[300], swf[300];
+        snprintf(root, sizeof(root), "%.*s", (int)(folder_end - game), game);
+        if (!find_site_page(root, root, base_name(game), 2, swf, sizeof(swf), page, sizeof(page)))
+            find_site_page(root, root, NULL, 2, swf, sizeof(swf), page, sizeof(page));
+    }
+    snprintf(url, sizeof(url), "file://%s\n%s\n%s", game, spoof, page);
     if (rw_core_start(url, w, h) != 0) logf_("rw_start failed for %s", game);
 }
 
@@ -1792,7 +1929,27 @@ static int run_game(const char* path, uint8_t* canvas) {
         if (g_nscript && !script_realtime) dt = 1000.0 / 60.0; // scripted runs: fixed steps, same as the PC host
         uint64_t t0 = OSGetSystemTime();
         int changed = rw_core_tick(dt);
-        if (changed) { // what the player sees: a game made for 30 fps shows 30 here when it's on speed
+        // The engine frees what a game dropped a little at a time, which is too slow for a game loading a new level
+        // with the old one's pictures still around (Happy Wheels ran out of memory). When the block is nearly full,
+        // and has filled further since the last time, everything unused is freed at once.
+        {
+            static uintptr_t collected_at;
+            uint8_t* res_base;
+            uint8_t* res_end;
+            uint8_t* res_low;
+            rw_res_range(&res_base, &res_end, &res_low);
+            if (res_base && gfx_pool_top()) {
+                uintptr_t used = (uintptr_t)(res_end - res_low) + (gfx_pool_top() - (uintptr_t)res_base);
+                uintptr_t size = (uintptr_t)(res_end - res_base);
+                if (used + ((uintptr_t)112 << 20) > size && used > collected_at + ((uintptr_t)8 << 20)) {
+                    rw_core_collect();
+                    logf_("nearly out of memory (%u MB): freed what the game no longer uses", (unsigned)(used >> 20));
+                    collected_at = used;
+                } else if (used + ((uintptr_t)32 << 20) < collected_at) {
+                    collected_at = used;
+                }
+            }
+        }        if (changed) { // what the player sees: a game made for 30 fps shows 30 here when it's on speed
             game_frames++;
             fps_frames++;
         }

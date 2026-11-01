@@ -60,6 +60,9 @@ pub enum AutoSizeMode {
     Right,
 }
 
+/// Between an `EditText`'s bounds and its text.
+pub const EDIT_TEXT_GUTTER: Twips = Twips::new(40);
+
 /// A dynamic text field.
 /// The text in this text field can be changed dynamically.
 /// It may be selectable or editable by the user, depending on the text field properties.
@@ -254,7 +257,7 @@ impl<'gc> EditText<'gc> {
     ///
     /// See <https://open-flash.github.io/mirrors/as2-language-reference/TextFormat.html#getTextExtent()>.
     /// See <https://help.adobe.com/en_US/FlashPlatform/reference/actionscript/3/flash/text/TextLineMetrics.html>.
-    const GUTTER: Twips = Twips::new(40);
+    const GUTTER: Twips = EDIT_TEXT_GUTTER;
 
     /// Creates a new `EditText` from an SWF `DefineEditText` tag.
     pub fn from_swf_tag(

@@ -68,6 +68,8 @@ struct C3dTexture {
     cube: bool,
     /// CompressedAlpha textures get DXT5 blocks (raw ATF), decoded to RGBA on upload.
     dxt5: bool,
+    /// Compressed textures can get raw DXT1 blocks, decoded the same way.
+    dxt1: bool,
 }
 
 impl Texture for C3dTexture {
@@ -383,7 +385,7 @@ impl HostContext3D {
         for (i, t) in self.textures.iter().enumerate() {
             let s = self.samplers[i];
             match t.as_ref().and_then(|t| <dyn std::any::Any>::downcast_ref::<C3dTexture>(t.texture.as_ref())) {
-                Some(c) => w.extend([c.tex.id, c.cube as u32, s.wrapping as u32, (s.filter as u32 != 0) as u32]),
+                Some(c) => w.extend([c.tex.id, c.cube as u32, s.wrapping as u32, (s.filter as u32 != 0) as u32 | (s.mipmap as u32) << 1]),
                 None => w.extend([0, 0, 0, 0]),
             }
         }
@@ -469,6 +471,43 @@ fn to_rgba(format: Context3DTextureFormat, src: &[u8], w: u32, h: u32) -> Option
         ),
         _ => None,
     }
+}
+
+/// DXT1 (BC1) blocks -> RGBA8. Each 4x4 block is 8 bytes; color0 <= color1 picks the mode with a transparent entry.
+fn dxt1_to_rgba(src: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
+    let (bw, bh) = (w.div_ceil(4) as usize, h.div_ceil(4) as usize);
+    if src.len() != bw * bh * 8 {
+        return None;
+    }
+    let (w, h) = (w as usize, h as usize);
+    let mut out = vec![0u8; w * h * 4];
+    for by in 0..bh {
+        for bx in 0..bw {
+            let b = &src[(by * bw + bx) * 8..][..8];
+            let c = |v: u16| [((v >> 11) * 255 / 31) as u32, (((v >> 5) & 63) * 255 / 63) as u32, ((v & 31) * 255 / 31) as u32];
+            let (v0, v1) = (u16::from_le_bytes([b[0], b[1]]), u16::from_le_bytes([b[2], b[3]]));
+            let (c0, c1) = (c(v0), c(v1));
+            let colors = if v0 > v1 {
+                [c0, c1, [0, 1, 2].map(|k| (2 * c0[k] + c1[k]) / 3), [0, 1, 2].map(|k| (c0[k] + 2 * c1[k]) / 3)]
+            } else {
+                [c0, c1, [0, 1, 2].map(|k| (c0[k] + c1[k]) / 2), [0, 0, 0]]
+            };
+            let bits = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+            for py in 0..4 {
+                for px in 0..4 {
+                    let (x, y) = (bx * 4 + px, by * 4 + py);
+                    if x >= w || y >= h {
+                        continue;
+                    }
+                    let i = ((bits >> ((py * 4 + px) * 2)) & 3) as usize;
+                    let col = colors[i];
+                    let a = if v0 <= v1 && i == 3 { 0 } else { 255 };
+                    out[(y * w + x) * 4..][..4].copy_from_slice(&[col[0] as u8, col[1] as u8, col[2] as u8, a]);
+                }
+            }
+        }
+    }
+    Some(out)
 }
 
 /// DXT5 (BC3) blocks -> RGBA8. Each 4x4 block: 8 bytes of interpolated alpha, 8 bytes of BC1 color.
@@ -580,7 +619,8 @@ impl Context3D for HostContext3D {
             host::log(1, &format!("Stage3D: texture format {format:?} is not supported, using RGBA"));
         }
         let dxt5 = matches!(format, Context3DTextureFormat::CompressedAlpha);
-        Ok(Rc::new(C3dTexture { tex: Rc::new(HostTexture::new_empty(width, height)), cube: false, dxt5 }))
+        let dxt1 = matches!(format, Context3DTextureFormat::Compressed);
+        Ok(Rc::new(C3dTexture { tex: Rc::new(HostTexture::new_empty(width, height)), cube: false, dxt5, dxt1 }))
     }
 
     fn create_cube_texture(
@@ -592,7 +632,8 @@ impl Context3D for HostContext3D {
     ) -> Result<Rc<dyn Texture>, Error> {
         // Faces +X, -X, +Y, -Y, +Z, -Z stacked top to bottom; CUBE_ATLAS_GLSL samples them.
         let dxt5 = matches!(format, Context3DTextureFormat::CompressedAlpha);
-        Ok(Rc::new(C3dTexture { tex: Rc::new(HostTexture::new_empty(size, size * 6)), cube: true, dxt5 }))
+        let dxt1 = matches!(format, Context3DTextureFormat::Compressed);
+        Ok(Rc::new(C3dTexture { tex: Rc::new(HostTexture::new_empty(size, size * 6)), cube: true, dxt5, dxt1 }))
     }
 
     fn upload_shaders(
@@ -681,18 +722,30 @@ impl Context3D for HostContext3D {
                 }
             }
             Context3DCommand::SetCulling { face: f } => self.culling = face(f),
-            Context3DCommand::CopyBitmapToTexture { source, source_width, source_height, dest, layer } => {
+            Context3DCommand::CopyBitmapToTexture { source, source_width, source_height, dest, layer, mip_level } => {
                 if let Some(t) = <dyn std::any::Any>::downcast_ref::<C3dTexture>(dest.as_ref()) {
-                    let (w, h) = (source_width.min(t.width()), source_height.min(t.height()));
+                    // (A cube texture's faces share one picture, which has no room for smaller versions.)
+                    if mip_level > 0 && t.cube {
+                        return;
+                    }
+                    let (w, h) = (source_width.min(t.width() >> mip_level), source_height.min(t.height() >> mip_level));
                     let y = if t.cube { layer.min(5) * t.width() } else { 0 };
+                    // (Compressed textures may also get JPEG-XR ATF data, which comes as RGBA: dxt1_to_rgba checks the length.)
                     let rgba = if t.dxt5 {
                         dxt5_to_rgba(source, source_width, source_height)
+                    } else if let Some(rgba) = t.dxt1.then(|| dxt1_to_rgba(source, source_width, source_height)).flatten() {
+                        Some(rgba)
                     } else {
                         to_rgba(Context3DTextureFormat::Bgra, source, source_width, source_height)
                             .or_else(|| to_rgba(Context3DTextureFormat::BgraPacked, source, source_width, source_height))
                     };
                     if let Some(rgba) = rgba {
-                        unsafe { host::host_tex_update(t.tex.id, 0, y, w, h, rgba.as_ptr(), source_width * 4) }
+                        if mip_level > 0 {
+                            let (w, h) = (w.max(1), h.max(1));
+                            unsafe { host::host_tex_mip(t.tex.id, mip_level, w, h, rgba.as_ptr(), source_width * 4) }
+                        } else {
+                            unsafe { host::host_tex_update(t.tex.id, 0, y, w, h, rgba.as_ptr(), source_width * 4) }
+                        }
                     }
                 }
             }
@@ -712,7 +765,7 @@ impl Context3D for HostContext3D {
             Context3DCommand::SetBlendFactors { source_factor, destination_factor } => {
                 self.blend = (factor(source_factor), factor(destination_factor));
             }
-            Context3DCommand::SetSamplerStateAt { sampler, wrap, filter } => {
+            Context3DCommand::SetSamplerStateAt { sampler, wrap, filter, mip_filter } => {
                 let i = sampler as usize;
                 if i < MAX_TEXTURES {
                     self.samplers[i].wrapping = match wrap {
@@ -724,6 +777,11 @@ impl Context3D for HostContext3D {
                     self.samplers[i].filter = match filter {
                         Context3DTextureFilter::Nearest => naga_agal::Filter::Nearest,
                         _ => naga_agal::Filter::Linear,
+                    };
+                    self.samplers[i].mipmap = match mip_filter {
+                        1 => naga_agal::Mipmap::Nearest,
+                        2 => naga_agal::Mipmap::Linear,
+                        _ => naga_agal::Mipmap::Disable,
                     };
                 }
             }

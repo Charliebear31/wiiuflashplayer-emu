@@ -598,6 +598,7 @@ pub enum Context3DCommand<'a> {
         source_height: u32,
         dest: Rc<dyn Texture>,
         layer: u32,
+        mip_level: u32,
     },
     SetTextureAt {
         sampler: u32,
@@ -622,6 +623,8 @@ pub enum Context3DCommand<'a> {
         sampler: u32,
         wrap: Context3DWrapMode,
         filter: Context3DTextureFilter,
+        /// 0: none, 1: nearest, 2: linear
+        mip_filter: u32,
     },
     SetScissorRectangle {
         rect: Option<Rectangle<Twips>>,
