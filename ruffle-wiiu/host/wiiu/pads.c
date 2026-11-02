@@ -40,6 +40,12 @@ static void stick_in(float* have, float v) {
 
 static Pads g_chan[NCHAN];
 static Pads g_vpad;
+static KPADStatus g_kpad[NCHAN];
+static int g_kpad_valid[NCHAN];
+
+const KPADStatus* pads_kpad(int chan) {
+    return chan >= 0 && chan < NCHAN && g_kpad_valid[chan] ? &g_kpad[chan] : NULL;
+}
 
 static void read_chan(int c) {
     KPADStatus st;
@@ -49,9 +55,12 @@ static void read_chan(int c) {
     Pads* p = &g_chan[c];
     if (err == KPAD_ERROR_INVALID_CONTROLLER) { // not connected
         memset(p, 0, sizeof(*p));
+        g_kpad_valid[c] = 0;
         return;
     }
     if (got <= 0 || st.error != KPAD_ERROR_OK) return; // no new sample: as it was
+    g_kpad[c] = st;
+    g_kpad_valid[c] = 1;
     memset(p, 0, sizeof(*p));
     int n_core = (int)(sizeof(CORE_BOTH) / sizeof(CORE_BOTH[0])), n_pro = (int)(sizeof(PRO) / sizeof(PRO[0]));
     switch (st.extensionType) {

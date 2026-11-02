@@ -151,15 +151,135 @@ fn flatten_shader(src: &str) -> String {
         out.push_str(&line);
         out.push('\n');
     }
+    propagate_immediates(&merge_component_writes(&out))
+}
+
+/// naga parks a shader's literal numbers in register 0's z and w (`local_float_reg_0_.z = float(vec4(0.5).x);`)
+/// and reads them back through a copy (`vec4 _e9 = local_float_reg_0_; ... * _e9.zzzz`). CafeGLSL got that wrong:
+/// a blend shader's `(a + b) * 0.5` kept a stale x lane (shader_as_mask), and writing the literal in place of
+/// the read fixed it. So every such read becomes the literal(s) again.
+fn propagate_immediates(src: &str) -> String {
+    const REG0: &str = "local_float_reg_0_";
+    let mut consts: [Option<String>; 4] = [None, None, None, None];
+    let mut aliases: Vec<(String, [Option<String>; 4])> = Vec::new();
+    let mut out = String::with_capacity(src.len());
+    for line in src.lines() {
+        let t = line.trim();
+        let mut line = line.to_string();
+        if !aliases.is_empty() {
+            line = replace_alias_swizzles(&line, &aliases);
+        }
+        if let Some(rest) = t.strip_prefix("vec4 ")
+            && let Some((name, value)) = rest.split_once(" = ")
+            && value == format!("{REG0};")
+            && name.starts_with("_e")
+        {
+            aliases.push((name.to_string(), consts.clone()));
+        } else if let Some(rest) = t.strip_prefix(REG0) {
+            if let Some(rest) = rest.strip_prefix('.')
+                && let Some(c) = rest.chars().next()
+                && let Some(lane) = "xyzw".find(c)
+            {
+                let value = rest[1..].trim_start_matches(" = ").trim_end_matches(';');
+                consts[lane] = value
+                    .strip_prefix("float(vec4(")
+                    .and_then(|v| v.strip_suffix(").x)"))
+                    .filter(|v| v.parse::<f64>().is_ok())
+                    .map(|v| v.to_string());
+            } else if rest.starts_with(" = ") {
+                consts = [None, None, None, None];
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
     out
+}
+
+/// `_eN.zw`-style reads of an alias of register 0 whose lanes are all known literals become those literals.
+fn replace_alias_swizzles(line: &str, aliases: &[(String, [Option<String>; 4])]) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find("_e") {
+        let (before, from) = rest.split_at(pos);
+        out.push_str(before);
+        let digits = from[2..].chars().take_while(|c| c.is_ascii_digit()).count();
+        let name = &from[..2 + digits];
+        let after = &from[2 + digits..];
+        let swz: String = after.strip_prefix('.').map_or(String::new(), |s| {
+            s.chars().take_while(|c| "xyzw".contains(*c)).take(4).collect()
+        });
+        let next_ok = after.get(1 + swz.len()..).and_then(|s| s.chars().next()).is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_');
+        let known = (digits > 0 && !swz.is_empty() && next_ok)
+            .then(|| aliases.iter().rev().find(|(n, _)| n == name))
+            .flatten()
+            .and_then(|(_, consts)| {
+                swz.chars().map(|c| consts["xyzw".find(c).unwrap()].clone()).collect::<Option<Vec<String>>>()
+            });
+        match known {
+            Some(values) => {
+                if values.len() == 1 {
+                    out.push_str(&values[0]);
+                } else {
+                    out.push_str(&format!("vec{}({})", values.len(), values.join(", ")));
+                }
+                rest = &after[1 + swz.len()..];
+            }
+            None => {
+                out.push_str(name);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// naga copies a register one component at a time (`r.x = float(e.x); r.y = float(e.y); ...`), and CafeGLSL dropped
+/// one of those writes now and then: a blend shader's `a + b` came out as `(b.x + b.x, a.y + b.y, ...)`. Four such
+/// lines from the same source become one vector assignment.
+fn merge_component_writes(src: &str) -> String {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < lines.len() {
+        if i + 3 < lines.len()
+            && let Some((name, source)) = component_write(lines[i], 'x')
+            && component_write(lines[i + 1], 'y') == Some((name, source))
+            && component_write(lines[i + 2], 'z') == Some((name, source))
+            && component_write(lines[i + 3], 'w') == Some((name, source))
+        {
+            out.push_str(&format!("    {name} = vec4({source});\n"));
+            i += 4;
+            continue;
+        }
+        out.push_str(lines[i]);
+        out.push('\n');
+        i += 1;
+    }
+    out
+}
+
+/// `name.c = float(source.c);` -> (name, source), for the component `c`.
+fn component_write(line: &str, c: char) -> Option<(&str, &str)> {
+    let t = line.trim();
+    let (name, rest) = t.split_once(&format!(".{c} = float(")).filter(|(n, _)| !n.contains(' '))?;
+    let source = rest.strip_suffix(&format!(".{c});"))?;
+    (!source.contains(' ') && !source.is_empty()).then_some((name, source))
 }
 pub fn compile(shader: PixelBenderShader) -> PixelBenderShaderHandle {
     let built = naga_pixelbender::ShaderBuilder::build(&shader);
     let (program, linear_mask) = match built.map_err(|e| format!("{e:?}")).and_then(|m| to_glsl(&m.fragment)) {
-        Ok((fs, linear_mask)) => (
-            unsafe { host::host_c3d_program(VERTEX_GLSL.as_ptr(), VERTEX_GLSL.len() as u32, fs.as_ptr(), fs.len() as u32) },
-            linear_mask,
-        ),
+        Ok((fs, linear_mask)) => {
+            // For looking at what CafeGLSL gets (the last shader compiled); overwritten each time. A pb_override.glsl
+            // next to it is compiled instead, for trying variants without a rebuild.
+            let _ = std::fs::write("/wiiu/apps/flashplayeremu/pb_last.glsl", &fs);
+            let fs = std::fs::read_to_string("/wiiu/apps/flashplayeremu/pb_override.glsl").unwrap_or(fs);
+            (
+                unsafe { host::host_c3d_program(VERTEX_GLSL.as_ptr(), VERTEX_GLSL.len() as u32, fs.as_ptr(), fs.len() as u32) },
+                linear_mask,
+            )
+        }
         Err(e) => {
             host::log(0, &format!("Pixel Bender: couldn't translate {:?}: {e}", shader.name));
             (0, 0)

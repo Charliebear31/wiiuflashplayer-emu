@@ -5,6 +5,7 @@ pub mod element_format;
 pub mod font_description;
 pub mod graphic_element;
 pub mod group_element;
+pub mod shaping;
 pub mod tab_stop;
 pub mod text_block;
 pub mod text_element;

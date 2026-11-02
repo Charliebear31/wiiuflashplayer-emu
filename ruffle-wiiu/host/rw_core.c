@@ -16,6 +16,9 @@
 #else
 #include <unistd.h>
 #endif
+#ifdef __WIIU__
+#include "wiiu/fastmem.h"
+#endif
 
 struct w2c_rw { int unused; };
 struct w2c_wasi__snapshot__preview1 { int unused; };
@@ -180,6 +183,76 @@ void w2c_rw_host_tex_mip(struct w2c_rw* rw, u32 id, u32 level, u32 w, u32 h, u32
     free(p);
 }
 
+#ifdef __WIIU__
+#include <coreinit/thread.h>
+typedef struct { const PerlinJob* job; uint32_t y0, y1; } PerlinWork;
+static int perlin_thread_main(int argc, const char** argv) {
+    (void)argc;
+    const PerlinWork* w = (const PerlinWork*)argv;
+    perlin_rows(w->job, w->y0, w->y1);
+    return 0;
+}
+static OSThread g_perlin_threads[2] __attribute__((aligned(16)));
+static uint8_t g_perlin_stacks[2][32 * 1024] __attribute__((aligned(16)));
+#endif
+
+// The rows of a noise picture, on every core the console has (the game's thread runs on core 1).
+static void perlin_run(const PerlinJob* job, uint32_t h) {
+#ifdef __WIIU__
+    if (h >= 48) {
+        static const uint32_t cores[2] = { OS_THREAD_ATTRIB_AFFINITY_CPU0, OS_THREAD_ATTRIB_AFFINITY_CPU2 };
+        PerlinWork work[2];
+        int started[2] = { 0, 0 };
+        uint32_t third = h / 3;
+        for (int i = 0; i < 2; i++) {
+            work[i].job = job;
+            work[i].y0 = (uint32_t)i * third;
+            work[i].y1 = (uint32_t)(i + 1) * third;
+            started[i] = OSCreateThread(&g_perlin_threads[i], perlin_thread_main, 0, (char*)&work[i],
+                                        g_perlin_stacks[i] + sizeof(g_perlin_stacks[i]), sizeof(g_perlin_stacks[i]), 16, cores[i]);
+            if (started[i]) OSResumeThread(&g_perlin_threads[i]);
+        }
+        perlin_rows(job, 2 * third, h);
+        for (int i = 0; i < 2; i++) {
+            if (started[i]) OSJoinThread(&g_perlin_threads[i], NULL);
+            else perlin_rows(job, work[i].y0, work[i].y1);
+        }
+        return;
+    }
+#endif
+    perlin_rows(job, 0, h);
+}
+
+u32 w2c_rw_host_perlin_noise(struct w2c_rw* rw, u32 pixels, u32 w, u32 h, f64 base_x, f64 base_y, u32 octaves, u64 seed,
+                             u32 flags, u32 offsets, u32 offsets_len) {
+    (void)rw;
+    if (!w || !h || offsets_len < octaves * 2 || !in_bounds(pixels, w * h * 4) || !in_bounds(offsets, offsets_len * 8)) return 0;
+    double* offs = (double*)malloc((size_t)offsets_len * 8 + 8);
+    uint8_t* out = (uint8_t*)malloc((size_t)w * h * 4);
+    PerlinJob* job = NULL;
+    if (offs && out) {
+        copy_out(offs, offsets, offsets_len * 8);
+#if WABT_BIG_ENDIAN
+        // (copy_out gives the bytes in wasm order, little-endian: each double needs turning round.)
+        for (u32 i = 0; i < offsets_len; i++) {
+            uint64_t v;
+            memcpy(&v, &offs[i], 8);
+            v = __builtin_bswap64(v);
+            memcpy(&offs[i], &v, 8);
+        }
+#endif
+        job = perlin_job_new(w, h, base_x, base_y, octaves, (int64_t)seed, flags, offs, out);
+    }
+    if (job) {
+        perlin_run(job, h);
+        copy_in(pixels, out, w * h * 4);
+    }
+    perlin_job_free(job);
+    free(offs);
+    free(out);
+    return job != NULL;
+}
+
 // Fills `count` words of wasm memory with one value: as a wasm loop this was a large part of BitmapData.fillRect.
 void w2c_rw_host_fill_words(struct w2c_rw* rw, u32 addr, u32 count, u32 value) {
     (void)rw;
@@ -188,6 +261,9 @@ void w2c_rw_host_fill_words(struct w2c_rw* rw, u32 addr, u32 count, u32 value) {
     uint32_t* d = (uint32_t*)(mem()->data_end - addr - count * 4);
 #else
     uint32_t* d = (uint32_t*)(mem()->data + addr);
+#endif
+#ifdef __WIIU__
+    if (((uintptr_t)d & 3) == 0) { rw_fill_words_fast(d, count, value); return; } // (a fifth of Moto X3M's time)
 #endif
     for (u32 i = 0; i < count; i++) d[i] = value;
 }

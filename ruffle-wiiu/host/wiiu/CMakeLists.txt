@@ -22,6 +22,7 @@ add_executable(flashplayeremu
     ${HOST}/wasm-rt/wasm-rt-mem-impl.c
     ${HOST}/wasm-rt/wasm-rt-exceptions-impl.c
     ${HOST}/rw_core.c
+    ${HOST}/perlin.c
     gfx_gx2.c
     kbd.cpp
     main_wiiu.c

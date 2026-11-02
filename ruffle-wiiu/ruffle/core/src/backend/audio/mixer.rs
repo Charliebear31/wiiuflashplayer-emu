@@ -337,18 +337,11 @@ impl AudioMixer {
     }
 
     /// Transforms a `Stream` into a new `Stream` that matches the output sample rate.
-    fn make_resampler<S: Stream>(&self, mut stream: S) -> impl Stream + use<S> {
-        // TODO: Allow interpolator to be user-configurable?
-        let left = stream.next();
-        let right = stream.next();
-        let interpolator = dasp::interpolate::linear::Linear::new(left, right);
+    fn make_resampler<S: Stream>(&self, stream: S) -> impl Stream + use<S> {
+        // Linear interpolation in integer arithmetic (dasp's converter went through f64 for every sample, a
+        // tenth of a frame on the Wii U with a few sounds playing).
         let sample_rate = stream.source_sample_rate().into();
-        ConverterStream(dasp::signal::interpolate::Converter::from_hz_to_hz(
-            stream,
-            interpolator,
-            sample_rate,
-            self.output_sample_rate.into(),
-        ))
+        FixedResampler::new(stream, sample_rate, self.output_sample_rate)
     }
 
     /// Creates a `Stream` for an "event" that decodes and resamples the audio stream to the
@@ -893,6 +886,62 @@ impl Stream for EventSoundStream {
 }
 
 /// A stream that converts a source stream to a different sample rate.
+/// Resamples a stream to the output rate with linear interpolation, in 16.16 fixed point.
+struct FixedResampler<S: Stream> {
+    source: S,
+    /// Source frames per output frame, 16.16.
+    step: u32,
+    /// Position between `prev` and `next`, 16.16.
+    phase: u32,
+    prev: [i16; 2],
+    next: [i16; 2],
+}
+
+impl<S: Stream> FixedResampler<S> {
+    fn new(mut source: S, source_rate: u32, output_rate: u32) -> Self {
+        let prev = source.next();
+        let next = source.next();
+        let step = (((source_rate.max(1) as u64) << 16) / output_rate.max(1) as u64) as u32;
+        Self { source, step, phase: 0, prev, next }
+    }
+}
+
+impl<S: Stream> Stream for FixedResampler<S> {
+    #[inline]
+    fn source_position(&self) -> u32 {
+        self.source.source_position()
+    }
+
+    #[inline]
+    fn source_sample_rate(&self) -> u16 {
+        self.source.source_sample_rate()
+    }
+}
+
+impl<S: Stream> dasp::signal::Signal for FixedResampler<S> {
+    type Frame = [i16; 2];
+
+    #[inline]
+    fn next(&mut self) -> [i16; 2] {
+        while self.phase >= 0x10000 {
+            self.phase -= 0x10000;
+            self.prev = self.next;
+            self.next = if self.source.is_exhausted() { [0, 0] } else { self.source.next() };
+        }
+        let f = (self.phase & 0xFFFF) as i32;
+        let lerp = |a: i16, b: i16| (a as i32 + (((b as i32 - a as i32) * f) >> 16)) as i16;
+        let out = [lerp(self.prev[0], self.next[0]), lerp(self.prev[1], self.next[1])];
+        self.phase += self.step;
+        out
+    }
+
+    #[inline]
+    fn is_exhausted(&self) -> bool {
+        self.source.is_exhausted()
+    }
+}
+
+#[allow(dead_code)]
 struct ConverterStream<S, I>(dasp::signal::interpolate::Converter<S, I>)
 where
     S: Stream,

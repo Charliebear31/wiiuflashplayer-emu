@@ -143,6 +143,7 @@ impl FontRenderer for FreetypeFontRenderer {
             ascent: self.ascent().get(),
             descent: self.descent().get(),
             leading: 0,
+            extra: None,
         }
     }
 

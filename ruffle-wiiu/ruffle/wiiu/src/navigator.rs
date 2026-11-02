@@ -32,11 +32,24 @@ impl HostNavigator {
     /// "http://its.site/flash/a.pak" start at the site's top, and relative links at the page, not the SWF.
     fn on_site(&self, url: &str) -> Option<String> {
         let parsed = self.resolve_url(url).ok()?;
-        // Armor Games' games wait for this online file before they start; the app carries a stand-in.
-        if parsed.host_str() == Some("agi.armorgames.com") && parsed.path().ends_with("/AGI.swf") {
-            return Some("file:///.content/stubs/AGI.swf".to_string());
-        }
-        let root = self.site_root.as_ref()?;
+        // Games wait for these online files before they start (a portal's API, an ad): the app carries
+        // stand-ins, whose services do nothing. (content/stubs; Mochi is blocked by the engine itself, and
+        // games handle that.)
+        const STAND_INS: &[(&str, &str, &str)] = &[
+            ("agi.armorgames.com", "/AGI.swf", "AGI.swf"),
+            ("kongregate.com", "/API_AS3_Local.swf", "Kongregate.swf"),
+            ("cpmstar.com", "/adviewas3.swf", "Blank.swf"),
+            ("cpmstar.com", "/adviewas2.swf", "BlankAS2.swf"),
+            ("gunblood.com", ".swf", "BlankAS2.swf"),
+        ];
+        if let Some(host) = parsed.host_str() {
+            for (site, ending, file) in STAND_INS {
+                if (host == *site || host.ends_with(&format!(".{site}"))) && parsed.path().ends_with(ending) {
+                    host::log(2, &format!("online file {parsed} replaced by the app's stand-in {file}"));
+                    return Some(format!("file:///.content/stubs/{file}"));
+                }
+            }
+        }        let root = self.site_root.as_ref()?;
         let path = percent_decode(parsed.path());
         let relative = match parsed.scheme() {
             "file" => {

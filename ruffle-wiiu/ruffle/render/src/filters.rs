@@ -87,6 +87,11 @@ impl Filter {
     }
 
     pub fn calculate_dest_rect(&self, source_rect: Rectangle<Twips>) -> Rectangle<Twips> {
+        // Nothing to grow: growing the invalid marker made it look like a real, enormous rectangle, and a
+        // parent's bounds then swallowed it (Gunblood's shadows: "incredibly large object", cacheAsBitmap skipped).
+        if !source_rect.is_valid() {
+            return source_rect;
+        }
         match self {
             Filter::BlurFilter(filter) => filter.calculate_dest_rect(source_rect),
             Filter::GlowFilter(filter) => filter.calculate_dest_rect(source_rect),

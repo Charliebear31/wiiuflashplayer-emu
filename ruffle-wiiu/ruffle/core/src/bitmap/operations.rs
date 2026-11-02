@@ -253,6 +253,23 @@ pub fn noise<'gc>(
 }
 
 #[expect(clippy::too_many_arguments)]
+#[cfg(target_os = "wasi")]
+#[link(wasm_import_module = "rw")]
+unsafe extern "C" {
+    fn host_perlin_noise(
+        pixels: *mut Color,
+        width: u32,
+        height: u32,
+        base_x: f64,
+        base_y: f64,
+        num_octaves: u32,
+        seed: i64,
+        flags: u32,
+        offsets: *const f64,
+        offsets_len: u32,
+    ) -> u32;
+}
+
 pub fn perlin_noise<'gc>(
     mc: &Mutation<'gc>,
     target: BitmapData<'gc>,
@@ -267,6 +284,38 @@ pub fn perlin_noise<'gc>(
 ) {
     let (target, _) = target.overwrite_cpu_pixels_from_gpu(mc);
     let mut write = target.borrow_mut(mc);
+
+    // The host does it natively, on every core (host/perlin.c): as wasm on one core, Happy Wheels' menu
+    // clouds took 15 s on the console.
+    #[cfg(target_os = "wasi")]
+    {
+        let flags = stitch as u32
+            | (fractal_noise as u32) << 1
+            | (grayscale as u32) << 2
+            | (write.transparency() as u32) << 3
+            | (channel_options.bits() as u32) << 4;
+        let flat: Vec<f64> = offsets.iter().flat_map(|o| [o.0, o.1]).collect();
+        let (w, h) = (write.width(), write.height());
+        let done = unsafe {
+            host_perlin_noise(
+                write.raw_pixels_mut().as_mut_ptr(),
+                w,
+                h,
+                base.0,
+                base.1,
+                num_octaves as u32,
+                random_seed,
+                flags,
+                flat.as_ptr(),
+                flat.len() as u32,
+            )
+        };
+        if done != 0 {
+            let region = PixelRegion::for_whole_size(w, h);
+            write.set_cpu_dirty(mc, region);
+            return;
+        }
+    }
 
     let turb = Turbulence::from_seed(random_seed);
 

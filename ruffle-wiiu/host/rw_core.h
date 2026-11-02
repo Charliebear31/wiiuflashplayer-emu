@@ -31,6 +31,12 @@ uint8_t* gfx_tex_update_begin(uint32_t id, uint32_t x, uint32_t y, uint32_t* pit
 void gfx_tex_update_end(uint32_t id, uint32_t y, uint32_t h);
 #endif
 void rw_core_collect(void);
+// BitmapData.perlinNoise, natively (perlin.c). flags: stitch, fractal, grayscale, transparent, then the channels.
+typedef struct PerlinJob PerlinJob;
+PerlinJob* perlin_job_new(uint32_t w, uint32_t h, double base_x, double base_y, uint32_t octaves, int64_t seed,
+                          uint32_t flags, const double* offsets, uint8_t* out);
+void perlin_rows(const PerlinJob* job, uint32_t y0, uint32_t y1);
+void perlin_job_free(PerlinJob* job);
 void gfx_tex_mip(uint32_t id, uint32_t level, uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t stride);
 void gfx_tex_free(uint32_t id);
 void gfx_tex_read(uint32_t id, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* out);

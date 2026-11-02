@@ -2,6 +2,7 @@ package flash.text.engine {
     import flash.display.DisplayObject;
     import flash.display.DisplayObjectContainer;
     import flash.errors.IllegalOperationError;
+    import flash.events.MouseEvent;
     import flash.geom.Point;
     import flash.geom.Rectangle;
     import flash.ui.ContextMenu;
@@ -16,6 +17,9 @@ package flash.text.engine {
         public static const MAX_LINE_WIDTH:int = 1000000;
 
         public var userData;
+
+        private var _mirrorRegions:Vector.<TextLineMirrorRegion> = null;
+        private var _mirrorsHooked:Boolean = false;
 
         public native function get rawTextLength():int;
 
@@ -51,10 +55,14 @@ package flash.text.engine {
 
         public native function get hasGraphicElement():Boolean;
 
+        private function blockText():String {
+            return this.textBlock && this.textBlock.content ? this.textBlock.content.rawText : null;
+        }
+
         // A surrogate pair is one atom; any other code unit is one too. Gives the unit each atom starts at, then the end.
         private function atomStarts():Array {
             var starts:Array = [];
-            var text:String = this.textBlock && this.textBlock.content ? this.textBlock.content.rawText : null;
+            var text:String = this.blockText();
             var begin:int = this.textBlockBeginIndex;
             var end:int = begin + this.rawTextLength;
             for (var i:int = begin; i < end; i++) {
@@ -133,9 +141,18 @@ package flash.text.engine {
             return -1;
         }
 
+        private static function isRightToLeft(code:Number):Boolean {
+            return (code >= 0x0590 && code <= 0x08FF) || (code >= 0xFB1D && code <= 0xFDFF) || (code >= 0xFE70 && code <= 0xFEFF);
+        }
+
         public function getAtomBidiLevel(index:int):int {
-            this.checkedAtom(index);
-            return this.textBlock ? this.textBlock.bidiLevel : 0;
+            var starts:Array = this.checkedAtom(index);
+            var base:int = this.textBlock ? this.textBlock.bidiLevel : 0;
+            var text:String = this.blockText();
+            if (text != null && isRightToLeft(text.charCodeAt(starts[index]))) {
+                return base | 1;
+            }
+            return base;
         }
 
         public function getAtomBounds(index:int):Rectangle {
@@ -143,6 +160,11 @@ package flash.text.engine {
             var begin:int = this.textBlockBeginIndex;
             var left:Number = this.charLeft(starts[index] - begin);
             var right:Number = this.charRight(starts[index + 1] - 1 - begin);
+            if (right < left) {
+                var swap:Number = left;
+                left = right;
+                right = swap;
+            }
             return new Rectangle(left, -this.ascent, right - left, this.ascent + this.descent);
         }
 
@@ -164,9 +186,30 @@ package flash.text.engine {
             return this.checkedAtom(index)[index + 1];
         }
 
+        // The element holding the unit at `unit` of the block's text.
+        private function elementAt(element:ContentElement, unit:int):ContentElement {
+            if (element == null) {
+                return null;
+            }
+            if (element is GroupElement) {
+                var group:GroupElement = element as GroupElement;
+                for (var i:int = 0; i < group.elementCount; i++) {
+                    var found:ContentElement = this.elementAt(group.getElementAt(i), unit);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+                return null;
+            }
+            var start:int = element.textBlockBeginIndex;
+            var length:int = element is GraphicElement ? 1 : (element.rawText == null ? 0 : element.rawText.length);
+            return unit >= start && unit < start + length ? element : null;
+        }
+
         public function getAtomTextRotation(index:int):String {
-            this.checkedAtom(index);
-            return TextRotation.ROTATE_0;
+            var starts:Array = this.checkedAtom(index);
+            var element:ContentElement = this.textBlock ? this.elementAt(this.textBlock.content, starts[index]) : null;
+            return element ? element.textRotation : TextRotation.ROTATE_0;
         }
 
         public function getAtomWordBoundaryOnLeft(index:int):Boolean {
@@ -174,11 +217,94 @@ package flash.text.engine {
             if (index == 0) {
                 return true;
             }
-            var text:String = this.textBlock && this.textBlock.content ? this.textBlock.content.rawText : null;
+            var text:String = this.blockText();
             if (text == null) {
                 return false;
             }
             return text.charAt(starts[index - 1]) == " " && text.charAt(starts[index]) != " ";
+        }
+
+        // Mirror regions: the parts of this line whose element has an eventMirror.
+
+        public function get mirrorRegions():Vector.<TextLineMirrorRegion> {
+            if (this._mirrorRegions == null) {
+                this._mirrorRegions = this.buildMirrorRegions();
+            }
+            return this._mirrorRegions.length > 0 ? this._mirrorRegions : null;
+        }
+
+        private function buildMirrorRegions():Vector.<TextLineMirrorRegion> {
+            var regions:Vector.<TextLineMirrorRegion> = new Vector.<TextLineMirrorRegion>();
+            var block:TextBlock = this.textBlock;
+            if (block == null || block.content == null) {
+                return regions;
+            }
+            var begin:int = this.textBlockBeginIndex;
+            this.collectMirrors(block.content, begin, begin + this.rawTextLength, regions);
+            for (var i:int = 0; i < regions.length; i++) {
+                regions[i]._previousRegion = i > 0 ? regions[i - 1] : null;
+                regions[i]._nextRegion = i + 1 < regions.length ? regions[i + 1] : null;
+            }
+            return regions;
+        }
+
+        private function collectMirrors(element:ContentElement, begin:int, end:int, regions:Vector.<TextLineMirrorRegion>):void {
+            if (element is GroupElement) {
+                var group:GroupElement = element as GroupElement;
+                for (var i:int = 0; i < group.elementCount; i++) {
+                    this.collectMirrors(group.getElementAt(i), begin, end, regions);
+                }
+                return;
+            }
+            if (element.eventMirror == null) {
+                return;
+            }
+            var start:int = element.textBlockBeginIndex;
+            var length:int = element is GraphicElement ? 1 : (element.rawText == null ? 0 : element.rawText.length);
+            var from:int = Math.max(start, begin);
+            var to:int = Math.min(start + length, end);
+            if (from >= to) {
+                return;
+            }
+            var left:Number = Infinity, right:Number = -Infinity;
+            for (var unit:int = from; unit < to; unit++) {
+                left = Math.min(left, this.charLeft(unit - begin));
+                right = Math.max(right, this.charRight(unit - begin));
+            }
+            var region:TextLineMirrorRegion = new TextLineMirrorRegion();
+            region._textLine = this;
+            region._element = element;
+            region._mirror = element.eventMirror;
+            region._bounds = new Rectangle(left, -this.ascent, right - left, this.ascent + this.descent);
+            regions.push(region);
+        }
+
+        // Called when the line is (re)created: mouse events over a mirror region are passed on to its mirror.
+        public function initMirrors():void {
+            this._mirrorRegions = null;
+            if (this._mirrorsHooked || this.mirrorRegions == null) {
+                return;
+            }
+            this._mirrorsHooked = true;
+            var types:Array = [MouseEvent.CLICK, MouseEvent.DOUBLE_CLICK, MouseEvent.MOUSE_DOWN, MouseEvent.MOUSE_UP,
+                MouseEvent.MOUSE_MOVE, MouseEvent.MOUSE_OVER, MouseEvent.MOUSE_OUT, MouseEvent.ROLL_OVER,
+                MouseEvent.ROLL_OUT, MouseEvent.MOUSE_WHEEL];
+            for each (var type:String in types) {
+                this.addEventListener(type, this.mirrorEvent);
+            }
+        }
+
+        private function mirrorEvent(event:MouseEvent):void {
+            var regions:Vector.<TextLineMirrorRegion> = this.mirrorRegions;
+            if (regions == null) {
+                return;
+            }
+            for each (var region:TextLineMirrorRegion in regions) {
+                if (region.bounds.contains(event.localX, event.localY)) {
+                    region.mirror.dispatchEvent(event.clone());
+                    return;
+                }
+            }
         }
 
         // This function does nothing in Flash Player 32

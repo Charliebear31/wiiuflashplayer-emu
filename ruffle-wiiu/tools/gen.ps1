@@ -156,3 +156,19 @@ static inline __attribute__((always_inline)) void rw_copy(void* d, const void* s
     [IO.File]::WriteAllText($impl, $text, (New-Object Text.UTF8Encoding $false))
     "patched wasm memory copies to use integer words"
 }
+
+# f32.nearest / f64.nearest called libm's nearbyint (a tenth of the console's time in Digger). Adding and
+# taking away 2^23 (2^52) rounds to nearest-even in the default rounding mode, with no call.
+$text = [IO.File]::ReadAllText($impl)
+if (-not $text.Contains('RW_NEAREST')) {
+    $pairs = @(
+        @("  return nearbyintf(x);`n", "  // ruffle-wiiu (tools/gen.ps1): RW_NEAREST without a libm call (see gen.ps1).`n  float ax = fabsf(x);`n  if (!(ax < 8388608.0f)) return x;`n  float r = (ax + 8388608.0f) - 8388608.0f;`n  return copysignf(r, x);`n"),
+        @("  return nearbyint(x);`n", "  double ax = fabs(x);`n  if (!(ax < 4503599627370496.0)) return x;`n  double r = (ax + 4503599627370496.0) - 4503599627370496.0;`n  return copysign(r, x);`n")
+    )
+    foreach ($p in $pairs) {
+        if (-not $text.Contains($p[0])) { throw "gen.ps1: couldn't find '$($p[0].Trim())' in $impl (wasm2c output changed?)" }
+        $text = $text.Replace($p[0], $p[1])
+    }
+    [IO.File]::WriteAllText($impl, $text, (New-Object Text.UTF8Encoding $false))
+    "patched f32/f64.nearest to avoid libm"
+}

@@ -1,5 +1,5 @@
 use crate::drawing::Drawing;
-use crate::font::{FontMetrics, Glyph};
+use crate::font::{FontExtraMetrics, FontMetrics, Glyph};
 use crate::prelude::*;
 use ruffle_render::shape_utils::{DrawCommand, FillRule};
 
@@ -96,6 +96,7 @@ pub struct FontFace {
     leading: i16,
     scale: f32,
     might_have_kerning: bool,
+    extra: FontExtraMetrics,
 }
 
 impl FontFace {
@@ -110,7 +111,17 @@ impl FontFace {
         let leading = face.line_gap();
         let scale = face.units_per_em() as f32;
         let glyphs = vec![OnceCell::new(); face.number_of_glyphs() as usize];
-
+        let units = face.units_per_em() as i32;
+        let extra = FontExtraMetrics {
+            underline_position: face.underline_metrics().map_or(-units / 10, |m| m.position as i32),
+            underline_thickness: face.underline_metrics().map_or(units / 20, |m| m.thickness as i32),
+            strikeout_position: face.strikeout_metrics().map_or(units * 3 / 10, |m| m.position as i32),
+            strikeout_thickness: face.strikeout_metrics().map_or(units / 20, |m| m.thickness as i32),
+            subscript_scale: face.subscript_metrics().map_or(0.6, |m| m.y_size as f32 / units as f32),
+            subscript_offset: face.subscript_metrics().map_or(units * 14 / 100, |m| m.y_offset as i32),
+            superscript_scale: face.superscript_metrics().map_or(0.6, |m| m.y_size as f32 / units as f32),
+            superscript_offset: face.superscript_metrics().map_or(units * 48 / 100, |m| m.y_offset as i32),
+        };
         // [NA] TODO: This is technically correct for just Kerning, but in practice kerning comes in many forms.
         // We need to support GPOS to do better at this, but that's a bigger change to font rendering as a whole.
         let might_have_kerning = face
@@ -132,6 +143,7 @@ impl FontFace {
             leading,
             scale,
             might_have_kerning,
+            extra,
         })
     }
 
@@ -149,6 +161,7 @@ impl FontFace {
             ascent: self.ascender,
             descent: self.descender,
             leading: self.leading,
+            extra: Some(self.extra),
         }
     }
 

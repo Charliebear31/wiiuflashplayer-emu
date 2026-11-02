@@ -15,6 +15,7 @@ add_executable(rwpc
     ${HOST}/wasm-rt/wasm-rt-mem-impl.c
     ${HOST}/wasm-rt/wasm-rt-exceptions-impl.c
     ${HOST}/rw_core.c
+    ${HOST}/perlin.c
     ${HOST}/gfx_gl.c
     ${HOST}/main_pc.c)
 target_include_directories(rwpc PRIVATE ${HOST} ${HOST}/wasm-rt ${GEN} ${SDL2_DIR}/include ${SDL2_DIR}/include/SDL2)

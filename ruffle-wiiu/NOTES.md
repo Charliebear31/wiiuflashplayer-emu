@@ -258,13 +258,47 @@ Route: Ruffle (Rust) -> `wasm32-wasip1` -> **wasm2c** -> C -> devkitPPC/wut. Sam
   all `if`s and the sampler helper because CafeGLSL hung in Cemu on them, and writes cross() out (it gave green from zero
   inputs). The PC host doesn't run these (gfx_pb_run returns 0): test in Cemu. Look right there: tintype, smudge, twirl,
   dithering, images, glassDisplace and its applyFilter. Not matching: BlurredFocus (halo still green; a vector pow() written
-  out changed nothing), shader_as_mask's first quadrant. Float targets for ShaderJob output are unverified.
+  out changed nothing). Float targets for ShaderJob output are unverified.
+  CafeGLSL bug found with shader_as_mask (2026-11-02): naga parks literals in register 0's z/w (`reg0.z = float(vec4(0.5).x)`)
+  and reads them through a copy (`_e9 = reg0; ... * _e9.zzzz`); CafeGLSL then kept a stale x lane, so `(a + b) * 0.5`
+  came out as `(b.x, (a+b).y/2, ...)`. Writing the literal in place of the read fixes it, so flatten_shader's
+  propagate_immediates does that for every such read (merge_component_writes also folds naga's four per-component
+  copies into one vector write; harmless, not the fix). Bisected with scratchpad pbtry.ps1: a pb_override.glsl in the
+  app folder replaces the generated fragment shader, and pb_last.glsl is what was generated. shader_as_mask's shader
+  quadrant now equals Ruffle's own output.ruffle.png; the rest of that test is Ruffle's known failure (shader masks).
 - Anything drawn with render_bitmap must stay alive until the flush: the last handle's drop frees the picture and the host
   skips the draw silently (put_pixels and apply_shader_filter both did this).
 - Text engine (2026-10-31): text_block.rs breaks lines itself (width, breakOpportunity, fitSomething) and keeps every span's format; a TextLine's origin is its baseline. 22 of 28 tests match real Flash; compare by trace with output.txt. Not done: bidi, vertical text and per-span rotation, ligatures, real getFontMetrics, mirror regions, tab alignment other than start; children of a TextLine.
 - Stage3D mipmaps: gfx_tex_mip adds a linear mip chain on first upload; not for cube textures. ATF: atf_jpegxr.rs decodes every mip; the lossy record layout is a guess (no public description, no test file) and only DXT data is used.
-- Test scripts: `realtime` must come after `movie` (before it, the menu loop consumes it). Without it, audio takes the fixed-step path, which never updates the peak meter and sounds choppy.
+- Test scripts: in a game `down`/`up` take their own `x y` (without them the press lands at 0,0); `click x y` does all three.
+  In the menu `move`/`down` are touches. `realtime` must come after `movie` (before it, the menu loop consumes it). Without it, audio takes the fixed-step path, which never updates the peak meter and sounds choppy.
 - Digger (Diggy, Box2D, GroundMap read with getPixel, holes drawn with BlendMode.ERASE): falls through the ground on the console with no tunnel drawn; in Cemu it digs normally. Possibly the same console-only problem as Moto's black blocks (unproven). swf/Readback Test logs "RB" lines with wrong pixels; all are 0 in Cemu.
+- 2026-11-02 additions: the system keyboard gets the Wii Remote channels too (pads_kpad -> swkbd ControllerInfo.kpad;
+  untested, Cemu has no Remote here). Online stand-ins in content/stubs: AGI (Armor Games), Kongregate (API_AS3_Local.swf:
+  a dynamic Sprite whose services are NullService, a Proxy that answers anything), Blank (AVM2) and BlankAS2 (18-byte AVM1)
+  for CPMStar/Gunblood ads; the table is STAND_INS in navigator.rs. Text engine: ElementFormat.getFontMetrics uses the
+  font file's OS/2 tables (FontMetrics.extra, only for FontFace fonts; SWF/Memory fonts keep the old guesses);
+  TextLineMirrorRegion is real and TextLine.initMirrors (called from text_block.rs) forwards mouse events to the
+  mirrors, TextLine now takes mouse picks; right-to-left runs are reversed (visual_order in text_block.rs: a simplified
+  bidi, no embeddings; the line keeps a logical->visual map for atoms). Liberation Sans draws Hebrew (checked in Cemu); Arabic has
+  no joining forms (no shaper). TextLine::filter_clip_event accepts mouse events, as EditText does, or none arrive. Not done: per-span rotation (lineRotation
+  turns the whole line and works), tab alignments other than start.
+- Wii Remote typing on the system keyboard (kbd.cpp feeds pads_kpad(0..3) to nn::swkbd::Calc) confirmed working on a
+  console (2026-11-02).
+- engine/shaping.rs (2026-11-02): before a line's EditText gets its text, Arabic letters become their joined presentation
+  forms (U+FE70.. / FB50.. by joining context, lam-alef as one glyph) and fi/fl/ffi/ffl become the font's ligature glyphs
+  (U+FB01..FB04) when the format's ligatureLevel allows. One unit per character stays: a ligature's other letters become
+  U+200B, so atoms, mirror regions and char positions still index the original text. Only forms the font has are used
+  (element_format::resolve_font, shared with getFontMetrics); Liberation Sans has fi/fl but no Arabic, so joining only
+  shows with a game's own embedded Arabic font. The line breaker still measures the unshaped text (a hair too wide).
+- Audio: the mixer's dasp linear resampler (f64 per sample) is replaced by FixedResampler in mixer.rs (16.16 integer
+  phase, i16 lerp); the console spent 5-13% of each frame mixing. Output stays 48 kHz (AX).
+- Console speed work (2026-11-02, from the console's slow spots): BitmapData.perlinNoise runs natively in host/perlin.c
+  (a line-for-line port of turbulence.rs, same pixels) over all three cores on the Wii U, via host_perlin_noise; Happy
+  Wheels' menu clouds took 15 s of noise on one core as wasm. The garbage collector's sleep factor is 1.5 (default 0.5,
+  Player::set_gc_sleep_factor): Gunblood spent about a fifth of its fight in do_collection/sweep. Filter::calculate_dest_rect
+  leaves an invalid rectangle alone: a filtered empty clip grew the INVALID marker (0x7ffffff twips = 6710886 px) into a
+  "real" rectangle, so Gunblood's shadows got 6.7-million-pixel bounds and lost cacheAsBitmap.
 - Happy Wheels' black level: its FPS text is BlendMode.INVERT, which went through a full-size layer, and the invert blend zeroed everything see-through. Fixed in set_blend (both hosts). Coloured or black sources still aren't exact: Flash inverts by coverage alone. main_wiiu.c also frees unused memory at once when the block is within 112 MB of full (rw_collect); that path hasn't been seen to run yet.
 - content/stubs/AGI.swf stands in for Armor Games' online AGI.swf (navigator.rs), which games wait for with no error handler (Johnny Upgrade). Readback Test on a console: 0 wrong, so Digger's fall and Moto's blocks aren't pixel readback.
 - Saved websites as game folders (Angry Birds Coke / McDonald's): a folder with no SWF at its top is listed under the
@@ -288,6 +322,32 @@ Route: Ruffle (Rust) -> `wasm32-wasip1` -> **wasm2c** -> C -> devkitPPC/wut. Sam
   (gfx_tex_update_begin) replace a wasm loop and a double copy. gfx_reset now frees at once: LTF3 left the pool top at 360 MB.
 - Watchdog stacks stop in system calls such as the log's mutex: they don't show where time goes. Use the alarm "slow spots",
   and look addresses up with nm (addr2line gave misleading names). EBF5 at 520 + 225 MB is the real limit, not a leak.
+- Console log of 2026-11-02 (build 1505), mapped with addr2line -f against the shipped ELF: the names it gives are the
+  innermost inlined frame, so "rw_copy" / "i32_load_unchecked" / "i32_store_unchecked" are the inlined wasm memory
+  accesses of whatever function holds them (no such symbols exist in the ELF: the accessors are inlined as intended).
+  Shares: AVM2 run_actions + its memory accesses 50-70% in Zuma / Happy Wheels / Angry Birds McDonald's (interpreter);
+  audio mixing (AudioMixerProxy::mix + mp3 synthesis) 5-13%; set_tex_surface's memset of every new texture 4-10%
+  (Digger, Angry Birds); fill_words 21% in Moto X3M; libm rintf 10% in Digger (f32.nearest); copy_out 7-11% (already
+  lwbrx). Memory growth doesn't move anything (expand_data_allocation only zeroes the new pages). Fixed in the next
+  build: host/wiiu/fastmem.h fills with dcbz (no read-allocate of the lines being overwritten) for texture clears and
+  fill_words, textures that get every pixel written skip the clear, and gen.ps1 replaces wasm_nearbyint(f) with the
+  add/subtract 2^23 (2^52) trick. Not fixed: the interpreter and the mixer (the mixer can't leave the wasm thread).
+  Speeds that log: Johnny Upgrade 59 fps, Angry Birds McDonald's 58 in play (17 while loading), Moto X3M 14, Digger
+  18-51, Happy Wheels 21-34, Zuma 25-58 (56+ once past its intro). Script: scratchpad conslog.ps1 (reads Desktop\log.txt).
+- Second console log the same day (build 1544, with those fills): fill_words fell from 21% to ~1% of Moto X3M's samples
+  and rintf is gone, but Moto's race is still ~5 fps (interpreter + copy_out + memmove: its picture copies) and Angry
+  Birds McDonald's in a level is 1 frame every 3-4 s, 56% interpreter + memory accesses, 27% memory copies
+  (memory_copy/copy_out/write_pixels/BitmapData init): a Box2D game in AS3, not fixable without a JIT. Digger 30-59.
+  Moto's black blocks (video): the sea's horizontal wave lines come out as 1-px vertical stripes and the sand's wavy top
+  edge as 8/16/32-px square steps, console only. Two console-only holes fixed blind (Cemu has no CPU cache and zeroes
+  memory): a picture's depth/stencil buffer is now cleared when it becomes a target (BitmapData.draw never clears, so
+  masks inside a drawn clip started from junk stencil on the console), and settle_target drops the CPU's cached lines of
+  a picture after the GPU drew into it (a partial tex_update merged new pixels into stale cached lines, zero from the
+  picture's fill, and wrote them back over the GPU's work 8 pixels at a time). A junk-filled stencil in Cemu changed
+  nothing (Cemu doesn't take CPU-written depth data). Console video (build 1626): Moto's blocks and stripes are gone
+  and Digger digs again, so the two together were it (not separated; the cache one is the likelier cause of both).
+  Lesson: a console-only picture bug is CPU cache coherence or uninitialised memory until proven otherwise; Cemu has
+  neither. Moto's race is still ~5 fps (interpreter + 38 MB of picture updates per 300 frames).
 - Stuck games: core/src/timer.rs update_timers' 64-bit `tick_time < cur_time` came out false in Cemu, so overdue timers
   never fired. Now tested by the difference's top bit. That unstuck Cat Mario's level, Duck Life 2, Papa's, Bloons and
   Learn To Fly 2 at once. Suspect other u64 comparisons if something "can't" happen. Test in levels, not just menus.

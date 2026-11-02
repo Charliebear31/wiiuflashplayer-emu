@@ -4,6 +4,7 @@
 // Every surface is LINEAR_ALIGNED RGBA8 (bytes R,G,B,A) so the CPU can update and read it directly.
 #include "../rw_core.h"
 #include "gfx_gx2.h"
+#include "fastmem.h"
 #include <coreinit/cache.h>
 #include <coreinit/memdefaultheap.h>
 #include <coreinit/messagequeue.h>
@@ -363,7 +364,9 @@ static uint32_t var_offset(int vertex, const char* name) {
 static int g_tile_next;
 static int g_float_next; // the next surface holds 32-bit float RGBA
 
-static void set_tex_surface(Tex* t, uint32_t w, uint32_t h) {
+// `clear` = 0 when the caller writes every pixel next: clearing was a tenth of the console's time in games
+// that make textures all the time (Digger, Angry Birds).
+static void set_tex_surface(Tex* t, uint32_t w, uint32_t h, int clear) {
     memset(&t->tex, 0, sizeof(t->tex));
     t->tex.surface.width = w;
     t->tex.surface.height = h;
@@ -380,7 +383,8 @@ static void set_tex_surface(Tex* t, uint32_t w, uint32_t h) {
     GX2InitTextureRegs(&t->tex);
     t->tex.surface.image = gpu_alloc(t->tex.surface.imageSize, t->tex.surface.alignment);
     if (!t->tex.surface.image) return; // (flushing a NULL image crashed the console: DSI at address 0)
-    memset(t->tex.surface.image, 0, t->tex.surface.imageSize);
+    if (!clear) return;
+    rw_zero_fast(t->tex.surface.image, t->tex.surface.imageSize);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, t->tex.surface.image, t->tex.surface.imageSize);
 }
 
@@ -408,6 +412,12 @@ static void make_target(Tex* t) {
     GX2InitDepthBufferRegs(&t->db);
     t->db.surface.image = gpu_alloc(t->db.surface.imageSize, t->db.surface.alignment);
     t->has_target = 1;
+    // A picture is drawn into without a clear (BitmapData.draw keeps what's there), so its stencil must start at 0
+    // for masks to work: the console's heap hands back whatever was in the memory before (Cemu hands back zeros).
+    if (t->db.surface.image) {
+        GX2ClearDepthStencilEx(&t->db, 1.0f, 0, GX2_CLEAR_FLAGS_BOTH);
+        GX2SetContextState(g_ctx); // (clears reset the context state)
+    }
 }
 
 static void free_tex(Tex* t) {
@@ -449,10 +459,10 @@ int gfx_gx2_init(uint32_t width, uint32_t height) {
     }
     GX2InitSampler(&g_ramp_sampler, GX2_TEX_CLAMP_MODE_CLAMP, GX2_TEX_XY_FILTER_MODE_LINEAR);
 
-    set_tex_surface(&g_screen, width, height); // what the menu draws, and where the game's picture is read back
+    set_tex_surface(&g_screen, width, height, 1); // what the menu draws, and where the game's picture is read back
     g_screen.used = 1;
     g_tile_next = 1;
-    set_tex_surface(&g_game_screen, width, height);
+    set_tex_surface(&g_game_screen, width, height, 1);
     g_tile_next = 0;
     make_target(&g_game_screen);
     g_game_screen.used = 1;
@@ -526,7 +536,7 @@ uint32_t gfx_tex_create(uint32_t w, uint32_t h, const uint8_t* rgba, uint32_t st
     t->used = 1;
     if (w > 8192) w = 8192;
     if (h > 8192) h = 8192;
-    set_tex_surface(t, w ? w : 1, h ? h : 1);
+    set_tex_surface(t, w ? w : 1, h ? h : 1, rgba == NULL || w == 0 || h == 0);
     if (rgba) write_pixels(t, 0, 0, w, h, rgba, stride);
     return id;
 }
@@ -538,6 +548,10 @@ static void settle_target(Tex* t) {
     t->target_dirty = 0;
     GX2Invalidate(GX2_INVALIDATE_MODE_COLOR_BUFFER, t->tex.surface.image, t->tex.surface.imageSize);
     gpu_sync();
+    // The CPU's cache may still hold this picture from before the GPU drew into it (its zero fill, an earlier
+    // read): a partial update would merge its new pixels into those stale lines and write the lot back over the
+    // GPU's work, 8 pixels at a time. Cemu has no cache, so it never showed it.
+    DCInvalidateRange(t->tex.surface.image, t->tex.surface.imageSize);
 }
 
 // The GPU may still be reading this texture for an earlier draw: wait only as long as that needs. A full
@@ -1236,6 +1250,7 @@ void gfx_gx2_read_screen_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, ui
 void gfx_tex_update_screen(const uint8_t* rgba) {
     gpu_sync();
     g_shown = &g_screen;
+    settle_target(&g_screen); // (a game's picture was last drawn into it by the GPU: drop the CPU's stale lines)
     write_pixels(&g_screen, 0, 0, g_screen.tex.surface.width, g_screen.tex.surface.height, rgba,
                  g_screen.tex.surface.width * 4);
 }
@@ -1246,7 +1261,8 @@ void gfx_tex_update_screen_rects(const uint8_t* rgba, const int (*rects)[4], int
     uint8_t* img = (uint8_t*)g_screen.tex.surface.image;
     if (!img || !n) return;
     // No wait for the GPU: the worst case is that a changed area shows one frame early, and waiting cost
-    // the menu ~5 ms a frame on the console.
+    // the menu ~5 ms a frame on the console. (settle_target only waits once, right after a game drew into it.)
+    settle_target(&g_screen);
     uint32_t pitch = g_screen.tex.surface.pitch * 4;
     for (int i = 0; i < n; i++) {
         uint32_t x = (uint32_t)rects[i][0], y = (uint32_t)rects[i][1], w = (uint32_t)rects[i][2], h = (uint32_t)rects[i][3];
@@ -1516,7 +1532,7 @@ static int scratch_size(uint32_t w, uint32_t h) {
         Tex* t = &g_scratch[i];
         if (t->tex.surface.image) free_tex(t);
         g_tile_next = 1;
-        set_tex_surface(t, nw, nh);
+        set_tex_surface(t, nw, nh, 1);
         g_tile_next = 0;
         if (!t->tex.surface.image) {
             g_heap_next = 0;
@@ -1886,7 +1902,7 @@ void gfx_gx2_set_border(const uint8_t* rgba, uint32_t x, uint32_t y, uint32_t w,
     // A new picture for each game: on the console the last game's art stayed up, cut off by a wider game.
     if (g_border.tex.surface.image) free_tex(&g_border);
     g_heap_next = 1;
-    set_tex_surface(&g_border, sw, sh);
+    set_tex_surface(&g_border, sw, sh, 0);
     g_heap_next = 0;
     gpu_sync();
     write_pixels(&g_border, 0, 0, sw, sh, rgba, sw * 4);
@@ -1906,7 +1922,7 @@ void gfx_gx2_set_hud(const uint8_t* rgba, uint32_t w, uint32_t h) {
         return;
     }
     g_heap_next = 1;
-    if (!g_hud.tex.surface.image) set_tex_surface(&g_hud, w, h);
+    if (!g_hud.tex.surface.image) set_tex_surface(&g_hud, w, h, 0);
     g_heap_next = 0;
     if (g_hud.tex.surface.width != w || g_hud.tex.surface.height != h) return;
     gpu_wait_last_frame(); // the last frame may still be reading it
@@ -1922,7 +1938,7 @@ static float g_cursor_xy[2];
 void gfx_gx2_set_cursor(const uint8_t* rgba, uint32_t w, uint32_t h) {
     if (g_cursor.tex.surface.image) return; // (always the same picture)
     g_heap_next = 1;
-    set_tex_surface(&g_cursor, w, h);
+    set_tex_surface(&g_cursor, w, h, 0);
     g_heap_next = 0;
     write_pixels(&g_cursor, 0, 0, w, h, rgba, w * 4);
 }
@@ -1940,7 +1956,7 @@ static float g_panel_xy[2][2];
 void gfx_gx2_set_panel(int slot, const uint8_t* rgba, uint32_t w, uint32_t h, uint32_t stride, float x, float y) {
     Tex* t = &g_panel[slot];
     g_heap_next = 1;
-    if (!t->tex.surface.image) set_tex_surface(t, w, h);
+    if (!t->tex.surface.image) set_tex_surface(t, w, h, 0);
     g_heap_next = 0;
     gpu_wait_last_frame(); // the last frame may still be reading it
     write_pixels(t, 0, 0, w, h, rgba, stride);

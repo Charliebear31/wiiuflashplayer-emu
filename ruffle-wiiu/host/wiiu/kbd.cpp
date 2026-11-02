@@ -1,5 +1,8 @@
 // The Wii U's system keyboard (nn::swkbd, C++ only) behind a small C interface; see kbd.h.
 #include "kbd.h"
+extern "C" {
+#include "pads.h"
+}
 #include <coreinit/filesystem.h>
 #include <coreinit/memdefaultheap.h>
 #include <nn/swkbd.h>
@@ -110,6 +113,8 @@ int kbd_update(VPADStatus* vs, char* out, size_t cap) {
         VPADGetTPCalibratedPoint(VPAD_CHAN_0, &copy.tpNormal, &vs->tpNormal);
         info.vpad = &copy;
     }
+    // Wii Remotes (and their Nunchuk, Classic or Pro Controller) type on it too, with the pointer as the cursor.
+    for (int c = 0; c < 4; c++) info.kpad[c] = (KPADStatus*)pads_kpad(c);
     nn::swkbd::Calc(info);
     if (nn::swkbd::IsNeedCalcSubThreadFont()) nn::swkbd::CalcSubThreadFont();
     if (nn::swkbd::IsNeedCalcSubThreadPredict()) nn::swkbd::CalcSubThreadPredict();

@@ -2058,6 +2058,17 @@ impl Player {
     }
 
     #[instrument(level = "debug", skip_all)]
+    /// How far the game's memory may grow between collections (1.0: double). The collector's default
+    /// of 0.5 had Gunblood spend a fifth of its time collecting.
+    pub fn set_gc_sleep_factor(&self, sleep_factor: f64) {
+        let pacing = gc_arena::metrics::Pacing {
+            sleep_factor,
+            min_sleep: 4096,
+            ..gc_arena::metrics::Pacing::DEFAULT
+        };
+        self.gc_arena.borrow().metrics().set_pacing(pacing);
+    }
+
     /// Frees everything the game no longer uses now, rather than a little each frame.
     pub fn collect_garbage(&mut self) {
         self.gc_arena.borrow_mut().finish_cycle();

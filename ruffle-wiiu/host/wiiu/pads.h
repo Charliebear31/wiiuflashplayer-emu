@@ -1,6 +1,7 @@
 // Every controller at once: the GamePad, Wii Remotes (with or without a Nunchuk), Classic and Pro Controllers.
 #pragma once
 #include <stdint.h>
+#include <padscore/kpad.h>
 #include <vpad/input.h>
 
 typedef struct {
@@ -15,3 +16,5 @@ typedef struct {
 void pads_init(void);
 // vs / err: this frame's VPADRead. Without a new sample a controller keeps its last state.
 void pads_read(const VPADStatus* vs, VPADReadError err, Pads* out);
+// The last sample from a Wii Remote channel (0..3), for the system keyboard; NULL when nothing is connected.
+const KPADStatus* pads_kpad(int chan);

@@ -264,6 +264,22 @@ pub struct FontMetrics {
     /// another, in EM-square coordinates.
     #[allow(dead_code)] // Web build falsely claims it's unused
     pub leading: i16,
+
+    /// Lines and scripts, from the font file's tables; none for SWF fonts.
+    pub extra: Option<FontExtraMetrics>,
+}
+
+/// Where a font draws its lines and scripts, in EM-square coordinates (positions are above the baseline).
+#[derive(Debug, Clone, Copy)]
+pub struct FontExtraMetrics {
+    pub underline_position: i32,
+    pub underline_thickness: i32,
+    pub strikeout_position: i32,
+    pub strikeout_thickness: i32,
+    pub subscript_scale: f32,
+    pub subscript_offset: i32,
+    pub superscript_scale: f32,
+    pub superscript_offset: i32,
 }
 
 impl FontMetrics {
@@ -273,6 +289,7 @@ impl FontMetrics {
         ascent: 0,
         descent: 0,
         leading: 0,
+        extra: None,
     };
 
     /// Get the baseline (ascent) from the top of the glyph at a given height.
@@ -408,6 +425,7 @@ impl<'gc> Font<'gc> {
                             ascent,
                             descent,
                             leading,
+                            extra: None,
                         },
                     }
                 },

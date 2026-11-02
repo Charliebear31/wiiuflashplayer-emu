@@ -575,8 +575,16 @@ pub fn do_create_text_line<'gc>(
     let text_line_instance = text_line.object2().expect("Already created the object2");
     let fallback = text_line.fallback();
 
-    fill_fallback(activation, fallback, &block_content, &tab_stops, previous_position, next_position, false);
-
+    let order = visual_order(&text[previous_position..next_position], block.bidi_level() % 2 == 1);
+    fill_fallback(activation, fallback, &block_content, &tab_stops, previous_position, next_position, false, order.as_deref());
+    let mut logical_to_visual = Vec::new();
+    if let Some(order) = &order {
+        logical_to_visual = vec![0; order.len()];
+        for (visual, &logical) in order.iter().enumerate() {
+            logical_to_visual[logical] = visual;
+        }
+    }
+    text_line.set_visual(logical_to_visual.clone(), activation.gc());
     justify_line(activation, block, fallback, width, next_position == text.len(), next_position == paragraph_end)?;
 
     let measured_text = fallback.measure_text(activation.context);
@@ -599,7 +607,10 @@ pub fn do_create_text_line<'gc>(
             .iter()
             .filter(|g| (previous_position..next_position).contains(&g.position))
             .map(|g| LineGraphic {
-                position: g.position - previous_position,
+                position: {
+                    let p = g.position - previous_position;
+                    logical_to_visual.get(p).copied().unwrap_or(p)
+                },
                 ..*g
             })
             .collect(),
@@ -615,6 +626,13 @@ pub fn do_create_text_line<'gc>(
     }
 
     block.set_text_line_creation_result(Some(result));
+
+    // Elements with an eventMirror: the line passes its mouse events on (TextLine.as).
+    let _ = Value::from(text_line_instance).call_public_property(
+        AvmString::new_utf8(activation.gc(), "initMirrors"),
+        FunctionArgs::from_slice(&[]),
+        activation,
+    );
 
     Ok(text_line_instance.into())
 }
@@ -713,11 +731,48 @@ fn fill_fallback<'gc>(
     from: usize,
     to: usize,
     word_wrap: bool,
+    order: Option<&[usize]>,
 ) {
     // TODO: Handle device font/non-device font properly
     fallback.set_is_device_font(activation.context, false);
     fallback.set_word_wrap(word_wrap, activation.context);
-    fallback.set_text(&content.spans.text()[from..to], activation.context);
+    // Joined Arabic forms and fi/fl ligatures, one unit per character still (shaping.rs).
+    let shaped = super::shaping::shape(activation, content.spans.text(), |p| content.format_at(p), from, to);
+    if let Some(order) = order {
+        // Shown in visual order (right-to-left runs reversed), each unit keeping its own format.
+        let mut visual = WString::with_capacity(order.len(), shaped.is_wide());
+        for &logical in order {
+            visual.push(shaped.get(logical).unwrap_or(0x20));
+        }
+        fallback.set_text(&visual, activation.context);
+        let span_of = |logical: usize| {
+            content
+                .spans
+                .iter_spans()
+                .position(|(s, e, _, _)| from + logical >= s && from + logical < e)
+        };
+        let mut v = 0;
+        while v < order.len() {
+            let id = span_of(order[v]);
+            let mut end = v + 1;
+            while end < order.len() && span_of(order[end]) == id {
+                end += 1;
+            }
+            if let Some((_, _, _, span)) = id.and_then(|i| content.spans.iter_spans().nth(i)) {
+                let mut format = span.get_text_format();
+                if tab_stops.is_some() {
+                    format.tab_stops = tab_stops.clone();
+                }
+                fallback.set_text_format(v, end, format.clone(), activation.context);
+                if v == 0 {
+                    fallback.set_new_text_format(format);
+                }
+            }
+            v = end;
+        }
+        return;
+    }
+    fallback.set_text(&shaped, activation.context);
     for (start, end, _, span) in content.spans.iter_spans() {
         let (start, end) = (start.max(from), end.min(to));
         if start < end {
@@ -731,6 +786,68 @@ fn fill_fallback<'gc>(
             }
         }
     }
+}
+
+fn is_right_to_left(unit: u16) -> bool {
+    matches!(unit, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+}
+
+/// The visual order of a line's units (visual -> logical), or `None` when it reads left to right as it is.
+/// Runs of right-to-left script are reversed; in a right-to-left block the runs themselves go right to left,
+/// with digits and left-to-right words kept in reading order. Spaces and punctuation take the direction of
+/// their neighbours when those agree, else the block's. (The simple part of Unicode's algorithm: no embeddings.)
+fn visual_order(text: &WStr, rtl_block: bool) -> Option<Vec<usize>> {
+    let n = text.len();
+    if n == 0 || (!rtl_block && !text.iter().any(is_right_to_left)) {
+        return None;
+    }
+    // 0: left to right, 1: right to left, 2: undecided
+    let neutral = |c: u16| matches!(c, 0x20 | 0x09 | 0x21 | 0x22 | 0x27..=0x2F | 0x3A..=0x3F | 0x5B..=0x5D | 0x7B..=0x7D | 0xA0);
+    let mut class: Vec<u8> = text
+        .iter()
+        .map(|c| if is_right_to_left(c) { 1 } else if neutral(c) { 2 } else { 0 })
+        .collect();
+    let base = rtl_block as u8;
+    let mut i = 0;
+    while i < n {
+        if class[i] != 2 {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < n && class[i] == 2 {
+            i += 1;
+        }
+        let left = if start == 0 { base } else { class[start - 1] };
+        let right = if i == n { base } else { class[i] };
+        let decided = if left == right { left } else { base };
+        for c in &mut class[start..i] {
+            *c = decided;
+        }
+    }
+    let mut runs: Vec<(usize, usize, u8)> = Vec::new();
+    let mut start = 0;
+    for i in 1..=n {
+        if i == n || class[i] != class[start] {
+            runs.push((start, i, class[start]));
+            start = i;
+        }
+    }
+    if rtl_block {
+        runs.reverse();
+    }
+    let mut order = Vec::with_capacity(n);
+    for (s, e, c) in runs {
+        if c == 1 {
+            order.extend((s..e).rev());
+        } else {
+            order.extend(s..e);
+        }
+    }
+    if order.iter().enumerate().all(|(v, &l)| v == l) {
+        return None;
+    }
+    Some(order)
 }
 
 /// Where a line starting at `start` ends, or `None` if nothing fits and nothing has to.
@@ -764,7 +881,7 @@ fn break_line<'gc>(
     // (`EditText` keeps a gutter on each side, which a text line doesn't have.)
     fallback.set_width(activation.context, width + 4.0);
     let word_wrap = matches!(opportunity, BreakOpportunityValue::Auto);
-    fill_fallback(activation, fallback, content, tab_stops, start, paragraph_end, word_wrap);
+    fill_fallback(activation, fallback, content, tab_stops, start, paragraph_end, word_wrap, None);
 
     let wrapped_length = fallback
         .layout()

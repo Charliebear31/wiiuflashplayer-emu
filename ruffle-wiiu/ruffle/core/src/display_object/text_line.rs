@@ -74,6 +74,8 @@ pub struct TextLineData<'gc> {
     baseline_shift: Cell<f64>,
     text_alpha: Cell<f64>,
     graphics: RefLock<Vec<LineGraphic<'gc>>>,
+    /// Where each unit of the line's text is shown, when right-to-left runs reorder it (logical -> visual).
+    visual: RefLock<Vec<usize>>,
 }
 
 impl<'gc> TextLine<'gc> {
@@ -103,6 +105,7 @@ impl<'gc> TextLine<'gc> {
                 baseline_shift: Cell::new(0.0),
                 text_alpha: Cell::new(1.0),
                 graphics: RefLock::new(Vec::new()),
+                visual: RefLock::new(Vec::new()),
             },
         ))
     }
@@ -132,6 +135,7 @@ impl<'gc> TextLine<'gc> {
 
         self.set_previous_line(None, mc);
         self.set_next_line(None, mc);
+        self.set_visual(Vec::new(), mc);
     }
 
     /// Release this line from its siblings and the block it's in.
@@ -171,6 +175,7 @@ impl<'gc> TextLine<'gc> {
         self.set_text_block(None, mc);
         self.set_previous_line(None, mc);
         self.set_next_line(None, mc);
+        self.set_visual(Vec::new(), mc);
     }
 
     pub fn set_line_rotation(self, value: TextRotationValue) {
@@ -189,6 +194,14 @@ impl<'gc> TextLine<'gc> {
         *unlock!(Gc::write(mc, self.0), TextLineData, graphics).borrow_mut() = value;
     }
 
+    pub fn set_visual(self, value: Vec<usize>, mc: &Mutation<'gc>) {
+        *unlock!(Gc::write(mc, self.0), TextLineData, visual).borrow_mut() = value;
+    }
+
+    fn visual_index(self, position: usize) -> usize {
+        self.0.visual.borrow().get(position).copied().unwrap_or(position)
+    }
+
     pub fn has_graphics(self) -> bool {
         !self.0.graphics.borrow().is_empty()
     }
@@ -199,7 +212,7 @@ impl<'gc> TextLine<'gc> {
 
     /// The left and right edges of a character, from the line's origin.
     pub fn char_x(self, position: usize) -> Option<(f64, f64)> {
-        let bounds = self.0.fallback.char_bounds(position)?;
+        let bounds = self.0.fallback.char_bounds(self.visual_index(position))?;
         Some(((bounds.x_min - EDIT_TEXT_GUTTER).to_pixels(), (bounds.x_max - EDIT_TEXT_GUTTER).to_pixels()))
     }
 
@@ -452,9 +465,13 @@ impl<'gc> TInteractiveObject<'gc> for TextLine<'gc> {
     fn filter_clip_event(
         self,
         _context: &mut UpdateContext<'gc>,
-        _event: ClipEvent,
+        event: ClipEvent,
     ) -> ClipEventResult {
-        ClipEventResult::NotHandled
+        // Mouse events reach the line (and its mirror regions), as they do a text field.
+        match event {
+            ClipEvent::Press { .. } | ClipEvent::MouseWheel { .. } | ClipEvent::MouseMove => ClipEventResult::Handled,
+            _ => ClipEventResult::NotHandled,
+        }
     }
 
     fn event_dispatch(
@@ -476,11 +493,16 @@ impl<'gc> TInteractiveObject<'gc> for TextLine<'gc> {
 
     fn mouse_pick_avm2(
         self,
-        _context: &mut UpdateContext<'gc>,
-        _point: Point<Twips>,
+        context: &mut UpdateContext<'gc>,
+        point: Point<Twips>,
         _require_button_mode: bool,
     ) -> Avm2MousePick<'gc> {
-        Avm2MousePick::Miss
+        // A line takes mouse events like any other object, so mirror regions get them.
+        if self.visible() && self.mouse_enabled() && self.hit_test_shape(context, point, HitTestOptions::MOUSE_PICK) {
+            Avm2MousePick::Hit(self.into())
+        } else {
+            Avm2MousePick::Miss
+        }
     }
 
     fn mouse_cursor(self, _context: &mut UpdateContext<'gc>) -> MouseCursor {

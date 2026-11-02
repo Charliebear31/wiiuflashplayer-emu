@@ -24,7 +24,7 @@ Other known limits:
 
 - Games can't go online: there are no network connections or sockets, so online features and games that download their content won't work.
 - Camera and microphone aren't supported.
-- Some less common parts of Flash are still missing or incomplete, such as right-to-left and vertical text, cube texture mipmaps, and Stage3D textures that only carry PVRTC or ETC data.
+- Some less common parts of Flash are still missing or incomplete, such as per-element text rotation (right-to-left text is basic, and Arabic letters only join with a game's own embedded font), cube texture mipmaps, and Stage3D textures that only carry PVRTC or ETC data.
 - Some Pixel Bender shaders don't draw correctly yet.
 - Only one H.264 video can decode smoothly at a time, because each decoder needs about 40 MB.
 
@@ -36,7 +36,9 @@ Other known limits:
 - Filters: blur, glow, drop shadow, bevel, gradient glow and bevel, colour matrix, convolution and displacement map, with the most common ones running on the GPU
 - Stage3D (3D games), with shaders compiled on the console, including cube textures, mipmaps and ATF textures
 - Flash text engine: line wrapping, mixed formats, baselines, justification and inline graphics
-- Works without the Armor Games online service: games that wait for its file still start, with scoreboards turned off
+- Works without the Armor Games and Kongregate online services, and without CPMStar ads: games that wait for those files still start, with scoreboards and logins turned off
+- Text engine: line wrapping, mixed formats, baselines, justification, inline graphics, font metrics from the font file, mirror regions, right-to-left runs, fi/fl ligatures, joined Arabic letters, rotated lines
+- BitmapData.perlinNoise runs natively on all three cores
 - Pixel Bender shaders (partial)
 - Video: H.263, VP6 and Screen Video, plus H.264 through the console's own decoder
 - Game saves: each game's save data is kept on the SD card
@@ -64,7 +66,7 @@ Other known limits:
 
 - **Wii Remote** with pointer, **Nunchuk**, **Classic Controller** and **Pro Controller** are supported through the same layout. These haven't been tested as much as the GamePad.
 - **On-screen keyboard:** tap the small keyboard button at the bottom left of the GamePad to get every key a game might ask for. It stays on the GamePad and never appears on the TV.
-- **System keyboard:** the Wii U's own keyboard opens when you tap a text box in a game.
+- **System keyboard:** the Wii U's own keyboard opens when you tap a text box in a game. Wii Remotes and the other controllers can type on it too.
 
 ## How to install
 

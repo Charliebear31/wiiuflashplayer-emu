@@ -167,6 +167,7 @@ impl FontRenderer for CanvasFontRenderer {
             ascent: (self.ascent * Self::SCALE) as i32,
             descent: (self.descent * Self::SCALE) as i32,
             leading: 0,
+            extra: None,
         }
     }
 

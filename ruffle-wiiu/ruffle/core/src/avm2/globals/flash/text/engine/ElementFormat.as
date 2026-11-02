@@ -1,6 +1,4 @@
 package flash.text.engine {
-    import __ruffle__.stub_method;
-
     import flash.geom.Rectangle;
 
     [API("662")]
@@ -121,12 +119,16 @@ package flash.text.engine {
             );
         }
 
+        // The font file's own figures, scaled to the size; the guesses below only when there's no such font.
+        private native function fontMetricsValues():Array;
+
         public function getFontMetrics():FontMetrics {
-            stub_method("flash.text.engine.ElementFormat", "getFontMetrics");
-            var emBox:Rectangle = new Rectangle(0, this.fontSize * -0.8, this.fontSize, this.fontSize);
-            return new FontMetrics(
-                emBox, -5, 1.2, 1.8, 1.2, 0.075, 0.6, -0.35, 0.6, 0.0
-            );
+            var v:Array = this.fontMetricsValues();
+            if (v == null) {
+                var emBox:Rectangle = new Rectangle(0, this.fontSize * -0.8, this.fontSize, this.fontSize);
+                return new FontMetrics(emBox, -5, 1.2, 1.8, 1.2, 0.075, 0.6, -0.35, 0.6, 0.0);
+            }
+            return new FontMetrics(new Rectangle(0, v[0], this.fontSize, v[1]), v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10]);
         }
     }
 }
