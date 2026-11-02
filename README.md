@@ -35,7 +35,6 @@ Other known limits:
 - Vector shapes, bitmaps, gradients, masks and all the common blend modes
 - Filters: blur, glow, drop shadow, bevel, gradient glow and bevel, colour matrix, convolution and displacement map, with the most common ones running on the GPU
 - Stage3D (3D games), with shaders compiled on the console, including cube textures, mipmaps and ATF textures
-- Flash text engine: line wrapping, mixed formats, baselines, justification and inline graphics
 - Works without the Armor Games and Kongregate online services, and without CPMStar ads: games that wait for those files still start, with scoreboards and logins turned off
 - Text engine: line wrapping, mixed formats, baselines, justification, inline graphics, font metrics from the font file, mirror regions, right-to-left runs, fi/fl ligatures, joined Arabic letters, rotated lines
 - BitmapData.perlinNoise runs natively on all three cores
